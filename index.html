@@ -2,7 +2,7 @@
 <html lang="sk">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>TopClima AirView</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&display=swap');
@@ -25,7 +25,7 @@ header h1{font-size:16px;font-weight:700;color:#0a5e46}
 .btn-primary{font-size:12px;font-weight:600;background:#0a5e46;color:#fff;border:none;padding:5px 16px;border-radius:5px;cursor:pointer;font-family:inherit}
 .btn-sm{font-size:11px;padding:4px 12px;border-radius:5px;border:1px solid #d5d2ca;background:#fff;cursor:pointer;font-family:inherit}
 .canvas-wrap{flex:1;display:flex;align-items:center;justify-content:center;padding:8px;min-height:0}
-canvas{background:#f7f6f2;border-radius:6px;cursor:crosshair;width:100%;height:100%}
+canvas{background:#f7f6f2;border-radius:6px;cursor:crosshair;width:100%;height:100%;touch-action:none}
 .legend{display:none;align-items:center;gap:5px;padding:3px 16px 6px;flex-shrink:0}
 .legend span{font-size:9px;color:#999}
 .legend .bar{height:7px;flex:1;max-width:280px;border-radius:3px;background:linear-gradient(to right,#1040d0,#20a0d0,#40c840,#e0d020,#e07020,#d02020)}
@@ -47,7 +47,13 @@ canvas{background:#f7f6f2;border-radius:6px;cursor:crosshair;width:100%;height:1
 <h1>TopClima AirView</h1>
 <span class="mode-label" id="modeLabel">Editor</span>
 <span id="statusMsg">Nakresli izbu ťahaním myši</span>
-<div style="margin-left:auto;display:flex;gap:6px">
+<div class="group" style="margin-left:auto"><label>Zoom</label><input type="range" id="zoomSlider" min="30" max="400" value="100" style="width:80px"><span class="val" id="zoomVal">1.0×</span></div>
+<div style="display:flex;gap:6px;align-items:center">
+<button class="btn-sm" id="saveBtn" title="Uložiť do prehliadača">💾 Uložiť</button>
+<button class="btn-sm" id="loadBtn" title="Načítať z prehliadača">📂 Načítať</button>
+<button class="btn-sm" id="exportBtn" title="Stiahnuť ako JSON súbor">⬇ Export</button>
+<label class="btn-sm" style="cursor:pointer" title="Načítať zo súboru">⬆ Import<input type="file" id="importFile" accept=".json" style="display:none"></label>
+<div style="width:1px;height:20px;background:#ddd;margin:0 2px"></div>
 <button class="btn-primary" id="simBtn" style="display:none">Simulovať →</button>
 <button class="btn-sm" id="editBtn" style="display:none">← Upraviť</button>
 <button class="btn-sm" id="clearBtn">Vymazať</button>
@@ -99,12 +105,15 @@ canvas{background:#f7f6f2;border-radius:6px;cursor:crosshair;width:100%;height:1
 <script>
 const cv=document.getElementById('c'),cx=cv.getContext('2d');let CW,CH;
 function resize(){const rect=cv.getBoundingClientRect();const w=Math.round(rect.width),h=Math.round(rect.height);
-if(w<10||h<10)return;cv.width=CW=w;cv.height=CH=h}
+if(w<10||h<10)return;const dpr=window.devicePixelRatio||1;cv.width=Math.round(w*dpr);cv.height=Math.round(h*dpr);CW=w;CH=h;cx.scale(dpr,dpr)}
 resize();window.addEventListener('resize',resize);
 requestAnimationFrame(()=>{resize()});
 const PPM=80,GRID=.1,OX=50,OY=36;let mode='editor',tool='room';
 let rooms=[],wins=[],furns=[],acUnits=[],doors=[],southSide=null,westSide=null;
 let dragS=null,dragE=null,isDrag=false,dragFurn=-1,dragOff={x:0,y:0},curX=-1,curY=-1,clickGuard=0;
+let vX=0,vY=0,panOn=false,panPX=0,panPY=0,panVX=0,panVY=0;
+let zoom=1,wallDrag=null,pinchOn=false,pinchDist0=0,pinchCX0=0,pinchCY0=0,pinchVX=0,pinchVY=0,pinchZoom0=1;
+const ptrs=new Map();
 const furDefs={couch:{w:1.6,h:.6,l:'Gauč',d:.99,sol:false},bed:{w:1.4,h:1.9,l:'Posteľ',d:.995,sol:false},ward:{w:.6,h:1.6,l:'Skriňa',d:1,sol:true},table:{w:.8,h:.5,l:'Stôl',d:.995,sol:false}};
 const mdl=[{n:'2.5kW',w:77,t:4,cool:.018},{n:'3.5kW',w:80,t:5.5,cool:.025},{n:'5.0kW',w:90,t:8.4,cool:.035}];
 function mToP(m){return m*PPM}function pToM(p){return p/PPM}function snapM(v){return Math.round(v/GRID)*GRID}function snapM2(v){return Math.round(v/(GRID*2))*(GRID*2)}
@@ -146,16 +155,21 @@ const rx=OX+mToP(r.x),ry=OY+mToP(r.y),rw=mToP(r.w),rh=mToP(r.h);
 let ax,ay;if(u.wall==='top'){ax=rx+u.pos*rw;ay=ry}else if(u.wall==='bottom'){ax=rx+u.pos*rw;ay=ry+rh}else if(u.wall==='left'){ax=rx;ay=ry+u.pos*rh}else{ax=rx+rw;ay=ry+u.pos*rh}
 if(Math.sqrt((mx-ax)**2+(my-ay)**2)<35){acUnits.splice(i,1);document.getElementById('statusMsg').textContent='Klima #'+(i+1)+' vymazaná';chkRdy();return true}}
 return false}
-function drawGrid(){cx.fillStyle='#f7f6f2';cx.fillRect(0,0,CW,CH);const mxW=(CW-OX-10)/PPM,mxH=(CH-OY-10)/PPM;
-cx.strokeStyle='rgba(0,0,0,0.12)';cx.lineWidth=.5;for(let m=0;m<=mxW;m+=GRID){cx.beginPath();cx.moveTo(OX+m*PPM,OY);cx.lineTo(OX+m*PPM,CH-8);cx.stroke()}
-for(let m=0;m<=mxH;m+=GRID){cx.beginPath();cx.moveTo(OX,OY+m*PPM);cx.lineTo(CW-8,OY+m*PPM);cx.stroke()}
-cx.strokeStyle='rgba(0,0,0,0.25)';cx.lineWidth=.7;for(let m=0;m<=mxW;m+=.5){cx.beginPath();cx.moveTo(OX+m*PPM,OY);cx.lineTo(OX+m*PPM,CH-8);cx.stroke()}
-for(let m=0;m<=mxH;m+=.5){cx.beginPath();cx.moveTo(OX,OY+m*PPM);cx.lineTo(CW-8,OY+m*PPM);cx.stroke()}
-cx.strokeStyle='rgba(0,0,0,0.35)';cx.lineWidth=1;for(let m=0;m<=mxW;m+=1){cx.beginPath();cx.moveTo(OX+m*PPM,OY);cx.lineTo(OX+m*PPM,CH-8);cx.stroke()}
-for(let m=0;m<=mxH;m+=1){cx.beginPath();cx.moveTo(OX,OY+m*PPM);cx.lineTo(CW-8,OY+m*PPM);cx.stroke()}
-cx.fillStyle='#777';cx.font='10px DM Sans,sans-serif';cx.textAlign='center';for(let m=0;m<=mxW;m+=1)cx.fillText(m+'m',OX+m*PPM,OY-8);
-cx.textAlign='right';for(let m=0;m<=mxH;m+=1)cx.fillText(m+'m',OX-6,OY+m*PPM+3)}
-function drawEditor(){cx.clearRect(0,0,CW,CH);drawGrid();
+function drawGrid(){const GW=30,GH=20;cx.fillStyle='#f7f6f2';cx.fillRect(-vX/zoom,-vY/zoom,CW/zoom,CH/zoom);
+const vx0=Math.max(0,Math.floor((-vX/zoom-OX)/PPM/GRID)*GRID),vx1=Math.min(GW,Math.ceil(((CW-vX)/zoom-OX)/PPM/GRID)*GRID);
+const vy0=Math.max(0,Math.floor((-vY/zoom-OY)/PPM/GRID)*GRID),vy1=Math.min(GH,Math.ceil(((CH-vY)/zoom-OY)/PPM/GRID)*GRID);
+cx.strokeStyle='rgba(0,0,0,0.12)';cx.lineWidth=.5;cx.beginPath();
+for(let m=vx0;m<=vx1;m+=GRID){cx.moveTo(OX+m*PPM,OY+vy0*PPM);cx.lineTo(OX+m*PPM,OY+vy1*PPM)}
+for(let m=vy0;m<=vy1;m+=GRID){cx.moveTo(OX+vx0*PPM,OY+m*PPM);cx.lineTo(OX+vx1*PPM,OY+m*PPM)}cx.stroke();
+cx.strokeStyle='rgba(0,0,0,0.25)';cx.lineWidth=.7;cx.beginPath();
+for(let m=0;m<=GW;m+=.5){cx.moveTo(OX+m*PPM,OY);cx.lineTo(OX+m*PPM,OY+GH*PPM)}
+for(let m=0;m<=GH;m+=.5){cx.moveTo(OX,OY+m*PPM);cx.lineTo(OX+GW*PPM,OY+m*PPM)}cx.stroke();
+cx.strokeStyle='rgba(0,0,0,0.35)';cx.lineWidth=1;cx.beginPath();
+for(let m=0;m<=GW;m+=1){cx.moveTo(OX+m*PPM,OY);cx.lineTo(OX+m*PPM,OY+GH*PPM)}
+for(let m=0;m<=GH;m+=1){cx.moveTo(OX,OY+m*PPM);cx.lineTo(OX+GW*PPM,OY+m*PPM)}cx.stroke();
+cx.fillStyle='#777';cx.font='10px DM Sans,sans-serif';cx.textAlign='center';for(let m=0;m<=GW;m+=1)cx.fillText(m+'m',OX+m*PPM,OY-8);
+cx.textAlign='right';for(let m=0;m<=GH;m+=1)cx.fillText(m+'m',OX-6,OY+m*PPM+3)}
+function drawEditor(){cx.clearRect(0,0,CW,CH);cx.save();cx.translate(vX,vY);cx.scale(zoom,zoom);drawGrid();
 if(isDrag&&dragS&&dragE){const x1=OX+mToP(Math.min(dragS.mx,dragE.mx)),y1=OY+mToP(Math.min(dragS.my,dragE.my)),w=mToP(Math.abs(dragE.mx-dragS.mx)),h=mToP(Math.abs(dragE.my-dragS.my));
 if(w>5&&h>5){cx.fillStyle='rgba(29,158,117,.05)';cx.fillRect(x1,y1,w,h);cx.strokeStyle='#1D9E75';cx.lineWidth=2;cx.setLineDash([6,4]);cx.strokeRect(x1,y1,w,h);cx.setLineDash([]);
 const wm=Math.abs(dragE.mx-dragS.mx),hm=Math.abs(dragE.my-dragS.my);cx.fillStyle='#0a5e46';cx.font='bold 15px DM Sans';cx.textAlign='center';
@@ -186,7 +200,7 @@ furns.forEach(f=>{const fx=OX+mToP(f.x),fy=OY+mToP(f.y),fw=mToP(f.w),fh=mToP(f.h
 if(f.sol){cx.fillStyle='rgba(70,58,45,.8)';cx.strokeStyle='rgba(50,40,30,.85)';cx.lineWidth=2;cx.beginPath();cx.roundRect(fx,fy,fw,fh,4);cx.fill();cx.stroke();cx.fillStyle='rgba(255,255,255,.6)';cx.font='bold 11px DM Sans';cx.textAlign='center';cx.fillText(f.l,fx+fw/2,fy+fh/2+4)}
 else{cx.strokeStyle='rgba(80,60,40,.25)';cx.lineWidth=1.5;cx.setLineDash([4,4]);cx.beginPath();cx.roundRect(fx,fy,fw,fh,4);cx.stroke();cx.setLineDash([]);cx.fillStyle='rgba(0,0,0,.18)';cx.font='11px DM Sans';cx.textAlign='center';cx.fillText(f.l,fx+fw/2,fy+fh/2+4)}});
 acUnits.forEach((u,i)=>{const r=rooms[u.ri];if(!r)return;const rx=OX+mToP(r.x),ry=OY+mToP(r.y),rw=mToP(r.w),rh=mToP(r.h);
-drawAcUnit(rx,ry,rw,rh,u.wall,u.pos,String(i+1))})}
+drawAcUnit(rx,ry,rw,rh,u.wall,u.pos,String(i+1))});cx.restore()}
 function drawAcUnit(rx,ry,rw,rh,wall,pos,label){const uw=56,uh=8;let ax,ay,bx,by,bw,bh;
 if(wall==='top'){ax=rx+pos*rw;ay=ry;bx=ax-uw/2;by=ay+1;bw=uw;bh=uh}
 else if(wall==='bottom'){ax=rx+pos*rw;ay=ry+rh;bx=ax-uw/2;by=ay-uh-1;bw=uw;bh=uh}
@@ -198,51 +212,106 @@ const txt=label||'AC';
 if(wall==='left'||wall==='right'){cx.save();cx.translate(bx+bw/2,by+bh/2);cx.rotate(-Math.PI/2);cx.fillText(txt,0,0);cx.restore()}
 else cx.fillText(txt,bx+bw/2,by+bh/2);
 cx.textBaseline='alphabetic'}
-cv.addEventListener('mousedown',function(e){if(mode!=='editor')return;const r=cv.getBoundingClientRect(),mx=(e.clientX-r.left)*(CW/r.width),my=(e.clientY-r.top)*(CH/r.height);
-if(tool==='room'){const mxM=snapM(pToM(mx-OX)),myM=snapM(pToM(my-OY));if(mxM>=0&&myM>=0){dragS={mx:mxM,my:myM};isDrag=true;dragE={mx:mxM,my:myM}}return}
+function wallNear(mx,my){const T=10/zoom;for(let i=rooms.length-1;i>=0;i--){const r=rooms[i],rx=OX+mToP(r.x),ry=OY+mToP(r.y),rw=mToP(r.w),rh=mToP(r.h);
+if(Math.abs(my-ry)<T&&mx>=rx-T&&mx<=rx+rw+T)return{ri:i,wall:'top'};
+if(Math.abs(my-(ry+rh))<T&&mx>=rx-T&&mx<=rx+rw+T)return{ri:i,wall:'bottom'};
+if(Math.abs(mx-rx)<T&&my>=ry-T&&my<=ry+rh+T)return{ri:i,wall:'left'};
+if(Math.abs(mx-(rx+rw))<T&&my>=ry-T&&my<=ry+rh+T)return{ri:i,wall:'right'}}return null}
+let wasPinch=false;
+cv.addEventListener('touchstart',function(e){e.preventDefault();if(e.touches.length>=2){panOn=false;pinchOn=true;wasPinch=true;
+const t=e.touches;pinchDist0=Math.hypot(t[1].clientX-t[0].clientX,t[1].clientY-t[0].clientY);
+const mx=(t[0].clientX+t[1].clientX)/2,my=(t[0].clientY+t[1].clientY)/2,rc=cv.getBoundingClientRect();
+pinchCX0=(mx-rc.left)*(CW/rc.width);pinchCY0=(my-rc.top)*(CH/rc.height);pinchVX=vX;pinchVY=vY;pinchZoom0=zoom}},{passive:false});
+cv.addEventListener('touchmove',function(e){e.preventDefault();if(pinchOn&&e.touches.length>=2){
+const t=e.touches,nd=Math.hypot(t[1].clientX-t[0].clientX,t[1].clientY-t[0].clientY);
+const dz=nd/pinchDist0,nz=Math.max(.3,Math.min(4,pinchZoom0*dz)),adz=nz/pinchZoom0;
+const mx=(t[0].clientX+t[1].clientX)/2,my=(t[0].clientY+t[1].clientY)/2,rc=cv.getBoundingClientRect();
+const sx=(mx-rc.left)*(CW/rc.width),sy=(my-rc.top)*(CH/rc.height);
+zoom=nz;vX=sx-(pinchCX0-pinchVX)*adz;vY=sy-(pinchCY0-pinchVY)*adz;syncZoomSlider()}},{passive:false});
+cv.addEventListener('touchend',function(e){if(e.touches.length<2)pinchOn=false;if(e.touches.length===0)setTimeout(function(){wasPinch=false},100)},{passive:false});
+cv.addEventListener('pointerdown',function(e){e.preventDefault();cv.setPointerCapture(e.pointerId);
+if(e.pointerType==='touch'){if(pinchOn)return;if(!panOn){panOn=true;panPX=e.clientX;panPY=e.clientY;panVX=vX;panVY=vY}return}
+if(e.button===1){panOn=true;panPX=e.clientX;panPY=e.clientY;panVX=vX;panVY=vY;return}
+if(mode!=='editor')return;
+const rc=cv.getBoundingClientRect(),mx=((e.clientX-rc.left)*(CW/rc.width)-vX)/zoom,my=((e.clientY-rc.top)*(CH/rc.height)-vY)/zoom;
+if(tool==='room'){const wd=wallNear(mx,my);if(wd){wallDrag={ri:wd.ri,wall:wd.wall,orig:{...rooms[wd.ri]}};return}
+const mxM=snapM(pToM(mx-OX)),myM=snapM(pToM(my-OY));if(mxM>=0&&myM>=0){dragS={mx:mxM,my:myM};isDrag=true;dragE={mx:mxM,my:myM}}return}
 if(['couch','bed','ward','table'].includes(tool)){for(let i=furns.length-1;i>=0;i--){const f=furns[i],fx=OX+mToP(f.x),fy=OY+mToP(f.y);
 if(mx>fx&&mx<fx+mToP(f.w)&&my>fy&&my<fy+mToP(f.h)){dragFurn=i;dragOff={x:mx-fx,y:my-fy};return}}}});
-cv.addEventListener('mousemove',function(e){const r=cv.getBoundingClientRect();curX=(e.clientX-r.left)*(CW/r.width);curY=(e.clientY-r.top)*(CH/r.height);
+cv.addEventListener('pointermove',function(e){e.preventDefault();
+if(e.pointerType==='touch'&&pinchOn)return;
+if(panOn){vX=panVX+(e.clientX-panPX);vY=panVY+(e.clientY-panPY);return}
+const rc=cv.getBoundingClientRect();curX=((e.clientX-rc.left)*(CW/rc.width)-vX)/zoom;curY=((e.clientY-rc.top)*(CH/rc.height)-vY)/zoom;
+if(wallDrag&&mode==='editor'){const r=rooms[wallDrag.ri],o=wallDrag.orig;
+const mxM=Math.max(0,snapM(pToM(curX-OX))),myM=Math.max(0,snapM(pToM(curY-OY)));
+if(wallDrag.wall==='top'){const ny=Math.min(myM,o.y+o.h-.5);r.y=Math.max(0,ny);r.h=o.y+o.h-r.y}
+else if(wallDrag.wall==='bottom'){r.h=Math.max(.5,myM-o.y)}
+else if(wallDrag.wall==='left'){const nx=Math.min(mxM,o.x+o.w-.5);r.x=Math.max(0,nx);r.w=o.x+o.w-r.x}
+else{r.w=Math.max(.5,mxM-o.x)}return}
 if(isDrag&&mode==='editor')dragE={mx:Math.max(0,snapM(pToM(curX-OX))),my:Math.max(0,snapM(pToM(curY-OY)))};
 if(dragFurn>=0&&mode==='editor'){furns[dragFurn].x=snapM2(pToM(curX-dragOff.x-OX));furns[dragFurn].y=snapM2(pToM(curY-dragOff.y-OY))}});
-cv.addEventListener('mouseup',function(){if(isDrag&&mode==='editor'&&dragS&&dragE){const w=Math.abs(dragE.mx-dragS.mx),h=Math.abs(dragE.my-dragS.my);
+cv.addEventListener('pointerup',function(e){
+if(e.pointerType==='touch'){panOn=false;
+if(wasPinch){isDrag=false;dragS=null;dragE=null;dragFurn=-1;wallDrag=null;return}
+const noAct=!isDrag&&!wallDrag;isDrag=false;dragS=null;dragE=null;dragFurn=-1;wallDrag=null;chkRdy();if(rooms.length)autoSave();
+if(noAct)cv.dispatchEvent(new MouseEvent('click',{bubbles:true,clientX:e.clientX,clientY:e.clientY}));return}
+if(panOn){panOn=false;return}
+if(wallDrag){wallDrag=null;autoSave();return}
+const wasDrag=isDrag&&dragS&&dragE&&(Math.abs(dragE.mx-dragS.mx)>=.5||Math.abs(dragE.my-dragS.my)>=.5);
+if(isDrag&&mode==='editor'&&dragS&&dragE){const w=Math.abs(dragE.mx-dragS.mx),h=Math.abs(dragE.my-dragS.my);
 if(w>=.5&&h>=.5){rooms.push({x:Math.min(dragS.mx,dragE.mx),y:Math.min(dragS.my,dragE.my),w,h,temp:26});
 document.getElementById('statusMsg').textContent='Izba #'+rooms.length+' pridaná';clickGuard=Date.now()}}
-isDrag=false;dragS=null;dragE=null;dragFurn=-1;chkRdy()});
-cv.addEventListener('click',function(e){const r=cv.getBoundingClientRect(),mx=(e.clientX-r.left)*(CW/r.width),my=(e.clientY-r.top)*(CH/r.height);
+isDrag=false;dragS=null;dragE=null;dragFurn=-1;chkRdy();if(rooms.length)autoSave()});
+cv.addEventListener('click',function(e){const r=cv.getBoundingClientRect(),mx=((e.clientX-r.left)*(CW/r.width)-vX)/zoom,my=((e.clientY-r.top)*(CH/r.height)-vY)/zoom;
 if(mode==='editor'){if(Date.now()-clickGuard<250)return;
-if(tool!=='room'&&tryDeleteAt(mx,my)){chkRdy();return}
+if(tool!=='room'&&tryDeleteAt(mx,my)){chkRdy();autoSave();return}
 if(tool==='room'){for(let i=rooms.length-1;i>=0;i--){const r=rooms[i],rx=OX+mToP(r.x),ry=OY+mToP(r.y),rw=mToP(r.w),rh=mToP(r.h);
 if(mx>rx&&mx<rx+rw&&my>ry&&my<ry+rh){
 wins=wins.filter(w=>w.ri!==i);doors=doors.filter(d=>d.ri!==i);acUnits=acUnits.filter(u=>u.ri!==i);
 wins.forEach(w=>{if(w.ri>i)w.ri--});doors.forEach(d=>{if(d.ri>i)d.ri--});acUnits.forEach(u=>{if(u.ri>i)u.ri--});
-rooms.splice(i,1);document.getElementById('statusMsg').textContent='Izba vymazaná';chkRdy();return}}}
-if(tool==='win'&&rooms.length){const w=wallAt(mx,my);if(w){wins.push({ri:w.ri,wall:w.wall,pos:w.pos});document.getElementById('statusMsg').textContent='Okno pridané';chkRdy()}return}
+rooms.splice(i,1);document.getElementById('statusMsg').textContent='Izba vymazaná';chkRdy();autoSave();return}}}
+if(tool==='win'&&rooms.length){const w=wallAt(mx,my);if(w){wins.push({ri:w.ri,wall:w.wall,pos:w.pos});document.getElementById('statusMsg').textContent='Okno pridané';chkRdy();autoSave()}return}
 if((tool==='south'||tool==='west')&&rooms.length){const bb=allBB(),bx=OX+mToP(bb.x),by=OY+mToP(bb.y),bw=mToP(bb.w),bh=mToP(bb.h);
 const cx2=bx+bw/2,cy2=by+bh/2,dx2=mx-cx2,dy2=my-cy2;
 let side;if(Math.abs(dx2)>Math.abs(dy2)){side=dx2<0?'left':'right'}else{side=dy2<0?'top':'bottom'}
 const names={top:'hore',bottom:'dole',left:'vľavo',right:'vpravo'};
 if(tool==='south'){if(side===westSide){document.getElementById('statusMsg').textContent='Táto strana je už Západ!';return}
-southSide=southSide===side?null:side;document.getElementById('statusMsg').textContent=southSide?'Juh ☀ = '+names[southSide]:'Juh zrušený'}
+southSide=southSide===side?null:side;document.getElementById('statusMsg').textContent=southSide?'Juh ☀ = '+names[southSide]:'Juh zrušený';autoSave()}
 else{if(side===southSide){document.getElementById('statusMsg').textContent='Táto strana je už Juh!';return}
-westSide=westSide===side?null:side;document.getElementById('statusMsg').textContent=westSide?'Západ ☀ = '+names[westSide]:'Západ zrušený'}return}
+westSide=westSide===side?null:side;document.getElementById('statusMsg').textContent=westSide?'Západ ☀ = '+names[westSide]:'Západ zrušený';autoSave()}return}
 if(tool==='temp'&&rooms.length){for(let i=rooms.length-1;i>=0;i--){const r=rooms[i],rx=OX+mToP(r.x),ry=OY+mToP(r.y),rw=mToP(r.w),rh=mToP(r.h);
 if(mx>rx&&mx<rx+rw&&my>ry&&my<ry+rh){const temps=[22,24,26,28,30,32,34];const ci=temps.indexOf(r.temp||26);r.temp=temps[(ci+1)%temps.length];
-document.getElementById('statusMsg').textContent='Izba #'+(i+1)+': '+r.temp+'°C';return}}return}
-if(tool==='door'&&rooms.length){const w=wallAt(mx,my);if(w&&isSharedWall(w.ri,w.wall)){doors.push({ri:w.ri,wall:w.wall,pos:w.pos});document.getElementById('statusMsg').textContent='Dvere pridané'}else if(w){document.getElementById('statusMsg').textContent='Dvere len na steny medzi izbami!'}return}
+document.getElementById('statusMsg').textContent='Izba #'+(i+1)+': '+r.temp+'°C';autoSave();return}}return}
+if(tool==='door'&&rooms.length){const w=wallAt(mx,my);if(w&&isSharedWall(w.ri,w.wall)){doors.push({ri:w.ri,wall:w.wall,pos:w.pos});document.getElementById('statusMsg').textContent='Dvere pridané';autoSave()}else if(w){document.getElementById('statusMsg').textContent='Dvere len na steny medzi izbami!'}return}
 if(tool==='ac'&&rooms.length){const w=wallAt(mx,my);if(w){
 acUnits.push({ri:w.ri,wall:w.wall,pos:w.pos,model:1,mode:1,on:true});
-document.getElementById('statusMsg').textContent='Klima #'+acUnits.length+' umiestnená!';chkRdy()}return}
+document.getElementById('statusMsg').textContent='Klima #'+acUnits.length+' umiestnená!';chkRdy();autoSave()}return}
 if(['couch','bed','ward','table'].includes(tool)&&rooms.length&&ptInAnyRoom(mx,my)){const fd=furDefs[tool];
 furns.push({x:snapM2(pToM(mx-OX)-fd.w/2),y:snapM2(pToM(my-OY)-fd.h/2),w:fd.w,h:fd.h,l:fd.l,d:fd.d,sol:fd.sol});
-document.getElementById('statusMsg').textContent=fd.l+' pridaný';return}}
+document.getElementById('statusMsg').textContent=fd.l+' pridaný';autoSave();return}}
 });
-cv.addEventListener('mouseleave',function(){curX=-1;curY=-1});
+cv.addEventListener('pointerleave',function(){curX=-1;curY=-1;panOn=false;wallDrag=null});
+cv.addEventListener('pointercancel',function(){panOn=false;pinchOn=false;wallDrag=null});
+cv.addEventListener('wheel',function(e){e.preventDefault();const dz=e.deltaY<0?1.1:1/1.1;const rc=cv.getBoundingClientRect(),sx=(e.clientX-rc.left)*(CW/rc.width),sy=(e.clientY-rc.top)*(CH/rc.height);vX=sx-(sx-vX)*dz;vY=sy-(sy-vY)*dz;zoom=Math.max(.3,Math.min(4,zoom*dz));syncZoomSlider()},{passive:false});
+cv.addEventListener('gesturestart',function(e){e.preventDefault()},{passive:false});
+cv.addEventListener('gesturechange',function(e){e.preventDefault()},{passive:false});
+const zoomSlider=document.getElementById('zoomSlider'),zoomVal=document.getElementById('zoomVal');
+zoomSlider.oninput=function(){const nz=+this.value/100,cx2=CW/2,cy2=CH/2;vX=cx2-(cx2-vX)*(nz/zoom);vY=cy2-(cy2-vY)*(nz/zoom);zoom=nz;zoomVal.textContent=nz.toFixed(1)+'×'};
+function syncZoomSlider(){zoomSlider.value=Math.round(zoom*100);zoomVal.textContent=zoom.toFixed(1)+'×'}
 document.getElementById('clearBtn').onclick=function(){rooms=[];wins=[];furns=[];doors=[];acUnits=[];southSide=null;westSide=null;setTool('room');chkRdy()};
+/* SAVE / LOAD */
+const LS_KEY='airview_v1';
+function getState(){return{rooms,wins,furns,doors,acUnits,southSide,westSide,insul:document.getElementById('insul').value,extS:document.getElementById('extS').value,extW:document.getElementById('extW').value}}
+function applyState(s){rooms=s.rooms||[];wins=s.wins||[];furns=s.furns||[];doors=s.doors||[];acUnits=s.acUnits||[];southSide=s.southSide||null;westSide=s.westSide||null;if(s.insul)document.getElementById('insul').value=s.insul;if(s.extS)document.getElementById('extS').value=s.extS;if(s.extW)document.getElementById('extW').value=s.extW;chkRdy()}
+function autoSave(){try{localStorage.setItem(LS_KEY,JSON.stringify(getState()))}catch(e){}}
+document.getElementById('saveBtn').onclick=function(){autoSave();document.getElementById('statusMsg').textContent='Uložené ✓'};
+document.getElementById('loadBtn').onclick=function(){const d=localStorage.getItem(LS_KEY);if(!d){document.getElementById('statusMsg').textContent='Nič uložené';return}applyState(JSON.parse(d));document.getElementById('statusMsg').textContent='Načítané ✓'};
+document.getElementById('exportBtn').onclick=function(){const a=document.createElement('a');a.href='data:application/json,'+encodeURIComponent(JSON.stringify(getState(),null,2));a.download='airview-podorys.json';a.click();document.getElementById('statusMsg').textContent='Exportované ✓'};
+document.getElementById('importFile').onchange=function(e){const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=function(ev){try{applyState(JSON.parse(ev.target.result));document.getElementById('statusMsg').textContent='Importované ✓'}catch(e){document.getElementById('statusMsg').textContent='Chyba: neplatný súbor'}};r.readAsText(f);this.value=''};
 /* SIMULATION */
 const SC=.1;let ST,STb,sgW,sgH,sExtT,sExtK,sAir,sFurS,sFurE,sWallH,sWallV;
 let uInv=[],uSmR=[],uOutT=[];
-let sRX,sRY,sRW,sRH,sBBx,sBBy;
+let sRX,sRY,sRW,sRH,sBBx,sBBy,simOfc=null;
 const MP=3000;let SP=new Array(MP);for(let i=0;i<MP;i++)SP[i]={x:0,y:0,vx:0,vy:0,age:0,mx:1,on:false,ui:-1};
 let spH=0,sRun=false,sST=0,sDn=false;
 function gES(){return+document.getElementById('eS').value/10}function gDF(){return+document.getElementById('dF').value/100}
@@ -408,13 +477,14 @@ if(sST>=sl&&!sDn){sDn=true;sRun=false;document.getElementById('sB').textContent=
 function tRGB(t){t=Math.max(16,Math.min(30,t));const n=(t-16)/14;const st=[[16,66,208],[32,160,208],[64,200,64],[224,208,32],[224,112,32],[208,32,32]];
 const p=n*(st.length-1),lo=Math.floor(p),hi=Math.min(lo+1,st.length-1),f=p-lo;
 return[Math.round(st[lo][0]+(st[hi][0]-st[lo][0])*f),Math.round(st[lo][1]+(st[hi][1]-st[lo][1])*f),Math.round(st[lo][2]+(st[hi][2]-st[lo][2])*f)]}
-function drawSim(){cx.clearRect(0,0,CW,CH);cx.fillStyle='#f7f6f2';cx.fillRect(0,0,CW,CH);
-const cpx=SC*PPM,img=cx.createImageData(Math.round(sRW),Math.round(sRH)),d=img.data,iw=img.width,ih=img.height;
+function drawSim(){cx.clearRect(0,0,CW,CH);cx.save();cx.translate(vX,vY);cx.scale(zoom,zoom);cx.fillStyle='#f7f6f2';cx.fillRect(-vX/zoom,-vY/zoom,CW/zoom,CH/zoom);
+const cpx=SC*PPM;if(!simOfc||simOfc.width!==Math.round(sRW)||simOfc.height!==Math.round(sRH)){simOfc=document.createElement('canvas');simOfc.width=Math.round(sRW);simOfc.height=Math.round(sRH)}
+const oc=simOfc.getContext('2d'),img=oc.createImageData(simOfc.width,simOfc.height),d=img.data,iw=img.width,ih=img.height;
 for(let gx=0;gx<sgW;gx++)for(let gy=0;gy<sgH;gy++){const idx=gy*sgW+gx,air=sAir[idx],sol=sFurS[idx];
 let r,g,b,al;if(!air){r=g=b=0;al=0}else if(sol){r=90;g=75;b=60;al=240}else{[r,g,b]=tRGB(ST[sid(gx,gy)]);al=220}
 const px0=Math.round(gx*cpx),py0=Math.round(gy*cpx),px1=Math.min(Math.round((gx+1)*cpx),iw),py1=Math.min(Math.round((gy+1)*cpx),ih);
 for(let px=px0;px<px1;px++)for(let py=py0;py<py1;py++){const j=(py*iw+px)*4;d[j]=r;d[j+1]=g;d[j+2]=b;d[j+3]=al}}
-cx.putImageData(img,Math.round(sRX),Math.round(sRY));
+oc.putImageData(img,0,0);cx.drawImage(simOfc,Math.round(sRX),Math.round(sRY));
 rooms.forEach(r=>{cx.strokeStyle='#222';cx.lineWidth=2;cx.strokeRect(OX+mToP(r.x),OY+mToP(r.y),mToP(r.w),mToP(r.h))});
 doors.forEach(d2=>{const p=objPx('door',d2);if(!p)return;cx.strokeStyle='#f7f6f2';cx.lineWidth=5;cx.beginPath();cx.moveTo(p.x1,p.y1);cx.lineTo(p.x2,p.y2);cx.stroke();
 cx.strokeStyle='#c07030';cx.lineWidth=2;cx.setLineDash([3,3]);cx.beginPath();cx.moveTo(p.x1,p.y1);cx.lineTo(p.x2,p.y2);cx.stroke();cx.setLineDash([])});
@@ -437,7 +507,7 @@ if(curX>sRX&&curX<sRX+sRW&&curY>sRY&&curY<sRY+sRH){const gx=Math.floor((curX-sRX
 if(gx>=0&&gx<sgW&&gy>=0&&gy<sgH&&sAir[gy*sgW+gx]){const sol=sFurS[gy*sgW+gx],tmp2=sol?null:ST[sid(gx,gy)],label=tmp2!==null?tmp2.toFixed(1)+'°C':'—';
 cx.beginPath();cx.arc(curX,curY,3,0,Math.PI*2);cx.fillStyle='rgba(255,255,255,.9)';cx.fill();cx.strokeStyle='rgba(0,0,0,.5)';cx.lineWidth=1;cx.stroke();
 const tw=cx.measureText(label).width,bw=tw+12,bh=20;let bx=curX-bw/2,by=curY-32;if(bx<sRX)bx=sRX;if(by<sRY)by=curY+12;
-cx.fillStyle='rgba(0,0,0,.8)';cx.beginPath();cx.roundRect(bx,by,bw,bh,4);cx.fill();cx.fillStyle='#fff';cx.font='bold 11px DM Sans';cx.textAlign='center';cx.textBaseline='middle';cx.fillText(label,bx+bw/2,by+bh/2);cx.textBaseline='alphabetic'}}}
+cx.fillStyle='rgba(0,0,0,.8)';cx.beginPath();cx.roundRect(bx,by,bw,bh,4);cx.fill();cx.fillStyle='#fff';cx.font='bold 11px DM Sans';cx.textAlign='center';cx.textBaseline='middle';cx.fillText(label,bx+bw/2,by+bh/2);cx.textBaseline='alphabetic'}}cx.restore()}
 function switchToSim(){mode='sim';initSim();document.getElementById('modeLabel').textContent='Simulácia';document.getElementById('statusMsg').textContent='Simulácia beží';
 document.getElementById('edToolbar').style.display='none';document.getElementById('simToolbar').style.display='flex';document.getElementById('tuneRow').style.display='flex';
 document.getElementById('unitCards').style.display='flex';document.getElementById('infoBar').style.display='none';document.getElementById('simLeg').style.display='flex';document.getElementById('simBtn').style.display='none';document.getElementById('editBtn').style.display='';document.getElementById('clearBtn').style.display='none'}
@@ -456,7 +526,7 @@ document.getElementById('eS').oninput=function(){document.getElementById('eSV').
 document.getElementById('dF').oninput=function(){document.getElementById('dFV').textContent=(+this.value/100).toFixed(1)+'x'};
 document.getElementById('sG').oninput=function(){document.getElementById('sGV').textContent=this.value+'%'};
 function loop(){const rect=cv.getBoundingClientRect();const w=Math.round(rect.width),h=Math.round(rect.height);
-if(w>10&&h>10&&(w!==CW||h!==CH)){cv.width=CW=w;cv.height=CH=h}
+if(w>10&&h>10&&(w!==CW||h!==CH)){resize()}
 if(mode==='editor')drawEditor();else{sEmit();sUpdP();sUpdG();drawSim()}requestAnimationFrame(loop)}loop();
 </script>
 </body>
