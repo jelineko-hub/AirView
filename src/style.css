@@ -47,7 +47,11 @@ header h1 { font-size: 16px; font-weight: 700; color: #0a5e46 }
   flex-wrap: wrap;
 }
 
-.sep { width: 1px; height: 20px; background: #ddd; margin: 0 3px }
+.sep { width: 1px; height: 28px; background: #ddd; margin: 0 3px; align-self: center }
+
+.tb-group { display: flex; flex-direction: column; align-items: flex-start; gap: 1px }
+.tb-group-label { font-size: 9px; font-weight: 600; color: #999; text-transform: uppercase; letter-spacing: .5px; padding-left: 2px }
+.tb-group-row { display: flex; align-items: center; gap: 4px }
 
 .tb {
   font-size: 11px;

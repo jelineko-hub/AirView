@@ -24,23 +24,27 @@
 </div>
 </header>
 <div class="toolbar" id="edToolbar">
-<button class="tb active" data-m="room">Izba</button>
+<div class="tb-group"><span class="tb-group-label">Pôdorys</span><div class="tb-group-row">
+<button class="tb active" data-m="room">Obdĺžnik</button>
+<button class="tb" data-m="line">Čiara</button>
+<button class="tb" data-m="walldelete">Spojiť izby</button>
+</div></div>
+<div class="sep"></div>
+<div class="tb-group"><span class="tb-group-label">Interiér</span><div class="tb-group-row">
 <button class="tb" data-m="win">Okno</button>
 <button class="tb" data-m="south">Juh ☀</button>
 <button class="tb" data-m="west">Západ ☀</button>
 <button class="tb" data-m="door">Dvere</button>
 <button class="tb" data-m="ac">Klima</button>
+<button class="tb" data-m="ward">Skriňa</button>
+</div></div>
 <div class="sep"></div>
+<div class="tb-group"><span class="tb-group-label">Prostredie</span><div class="tb-group-row">
 <div class="group" style="gap:2px"><label style="font-size:10px">Izolácia</label><select id="insul" style="font-size:10px;font-family:inherit;padding:1px 4px;border:1px solid #d0d0c8;border-radius:3px"><option value="1">1 – Žiadna</option><option value="2" selected>2 – Slabá</option><option value="3">3 – Stredná</option><option value="4">4 – Hrubá</option></select></div>
 <div class="group" style="gap:2px"><label style="font-size:10px">Vonku J</label><select id="extS" style="font-size:10px;font-family:inherit;padding:1px 4px;border:1px solid #d0d0c8;border-radius:3px"><option value="30">30°C</option><option value="32">32°C</option><option value="34">34°C</option><option value="35" selected>35°C</option><option value="37">37°C</option><option value="40">40°C</option></select></div>
 <div class="group" style="gap:2px"><label style="font-size:10px">Vonku Z</label><select id="extW" style="font-size:10px;font-family:inherit;padding:1px 4px;border:1px solid #d0d0c8;border-radius:3px"><option value="28">28°C</option><option value="30" selected>30°C</option><option value="32">32°C</option><option value="34">34°C</option><option value="36">36°C</option></select></div>
-<div class="sep"></div>
-<button class="tb" data-m="couch">Gauč</button>
-<button class="tb" data-m="bed">Posteľ</button>
-<button class="tb" data-m="ward">Skriňa</button>
-<button class="tb" data-m="table">Stôl</button>
-<div class="sep"></div>
 <button class="tb" data-m="temp">°C Teplota</button>
+</div></div>
 <span style="font-size:10px;color:#bbb;margin-left:8px">Klik na objekt = vymaž</span>
 </div>
 <div class="toolbar" id="simToolbar" style="display:none">
@@ -57,8 +61,6 @@
 <div id="unitCards" style="display:none;padding:4px 16px;background:#faf9f6;border-bottom:1px solid #e8e5dd;flex-wrap:wrap;gap:6px;align-items:center"></div>
 <div class="tune-row" id="tuneRow">
 <span style="font-size:10px;font-weight:600;color:#888">Ladenie</span>
-<div class="group"><span class="lbl">Gauč</span><input type="range" min="900" max="1000" step="5" value="990" id="dG" style="width:44px;accent-color:#0a5e46"><span class="val" id="dGV">.990</span></div>
-<div class="group"><span class="lbl">Posteľ</span><input type="range" min="900" max="1000" step="5" value="995" id="dP" style="width:44px;accent-color:#0a5e46"><span class="val" id="dPV">.995</span></div>
 <div class="group"><span class="lbl">Hrany</span><input type="range" min="0" max="50" step="2" value="50" id="eS" style="width:44px;accent-color:#0a5e46"><span class="val" id="eSV">5.0</span></div>
 <div class="group"><span class="lbl">Difúzia</span><input type="range" min="10" max="500" step="5" value="300" id="dF" style="width:44px;accent-color:#0a5e46"><span class="val" id="dFV">3.0x</span></div>
 <div class="group"><span class="lbl">Slnko</span><input type="range" min="0" max="100" step="5" value="50" id="sG" style="width:44px;accent-color:#0a5e46"><span class="val" id="sGV">50%</span></div>

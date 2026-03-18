@@ -43,6 +43,30 @@ function cellInDoor(px1, py1, px2, py2) {
 
 // ── Build wall maps ──
 
+function cellInWallOpening(px, py) {
+  return scene.wallOpenings.some(wo => {
+    const isH = Math.abs(wo.y1 - wo.y2) < .01;
+    if (isH) {
+      const minX = Math.min(wo.x1, wo.x2), maxX = Math.max(wo.x1, wo.x2);
+      return Math.abs(py - wo.y1) < sim.cellSize * 2 && px >= minX && px <= maxX;
+    }
+    const minY = Math.min(wo.y1, wo.y2), maxY = Math.max(wo.y1, wo.y2);
+    return Math.abs(px - wo.x1) < sim.cellSize * 2 && py >= minY && py <= maxY;
+  });
+}
+
+function cellOnLine(px, py) {
+  return scene.lines.some(ln => {
+    const isH = Math.abs(ln.y1 - ln.y2) < .01;
+    if (isH) {
+      const minX = Math.min(ln.x1, ln.x2), maxX = Math.max(ln.x1, ln.x2);
+      return Math.abs(py - ln.y1) < sim.cellSize * .6 && px >= minX && px <= maxX;
+    }
+    const minY = Math.min(ln.y1, ln.y2), maxY = Math.max(ln.y1, ln.y2);
+    return Math.abs(px - ln.x1) < sim.cellSize * .6 && py >= minY && py <= maxY;
+  });
+}
+
 function buildWallMaps() {
   const { gridW, gridH, cellSize, bboxX, bboxY } = sim;
   sim.wallH = new Uint8Array(gridW * gridH);
@@ -50,12 +74,17 @@ function buildWallMaps() {
 
   for (let y = 0; y < gridH; y++) {
     for (let x = 0; x < gridW; x++) {
+      const px = bboxX + (x + .5) * cellSize;
+      const py = bboxY + (y + .5) * cellSize;
+
       if (x > 0) {
         const r1 = cellRoom(x - 1, y), r2 = cellRoom(x, y);
         if (r1 !== r2 && r1 >= 0 && r2 >= 0) {
           const px1 = bboxX + (x - .5) * cellSize, py1 = bboxY + (y + .5) * cellSize;
           const px2 = bboxX + (x + .5) * cellSize, py2 = py1;
-          sim.wallH[y * gridW + x] = cellInDoor(px1, py1, px2, py2) ? 0 : 1;
+          const inDoor = cellInDoor(px1, py1, px2, py2);
+          const inOpening = cellInWallOpening(px, py);
+          sim.wallH[y * gridW + x] = (inDoor || inOpening) ? 0 : 1;
         }
       }
       if (y > 0) {
@@ -63,11 +92,33 @@ function buildWallMaps() {
         if (r1 !== r2 && r1 >= 0 && r2 >= 0) {
           const px1 = bboxX + (x + .5) * cellSize, py1 = bboxY + (y - .5) * cellSize;
           const px2 = px1, py2 = bboxY + (y + .5) * cellSize;
-          sim.wallV[y * gridW + x] = cellInDoor(px1, py1, px2, py2) ? 0 : 1;
+          const inDoor = cellInDoor(px1, py1, px2, py2);
+          const inOpening = cellInWallOpening(px, py);
+          sim.wallV[y * gridW + x] = (inDoor || inOpening) ? 0 : 1;
         }
       }
     }
   }
+
+  // Add line walls
+  scene.lines.forEach(ln => {
+    const isH = Math.abs(ln.y1 - ln.y2) < .01;
+    if (isH) {
+      const gy = Math.round((ln.y1 - bboxY) / cellSize);
+      const gx1 = Math.floor((Math.min(ln.x1, ln.x2) - bboxX) / cellSize);
+      const gx2 = Math.ceil((Math.max(ln.x1, ln.x2) - bboxX) / cellSize);
+      for (let x = Math.max(0, gx1); x <= Math.min(gridW - 1, gx2); x++) {
+        if (gy >= 0 && gy < gridH) sim.wallV[gy * gridW + x] = 1;
+      }
+    } else {
+      const gx = Math.round((ln.x1 - bboxX) / cellSize);
+      const gy1 = Math.floor((Math.min(ln.y1, ln.y2) - bboxY) / cellSize);
+      const gy2 = Math.ceil((Math.max(ln.y1, ln.y2) - bboxY) / cellSize);
+      for (let y = Math.max(0, gy1); y <= Math.min(gridH - 1, gy2); y++) {
+        if (gx >= 0 && gx < gridW) sim.wallH[y * gridW + gx] = 1;
+      }
+    }
+  });
 }
 
 // ── Build simulation maps ──

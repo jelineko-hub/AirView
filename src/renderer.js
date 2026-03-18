@@ -2,7 +2,53 @@ import {
   PPM, GRID, OX, OY, AC_MODELS, MAX_PARTICLES,
   canvas, scene, view, editor, sim, particles, dom,
 } from './state.js';
-import { mToP, allBoundingBox, getObjectPixels } from './utils.js';
+import { mToP, pToM, allBoundingBox, getObjectPixels } from './utils.js';
+
+// ── Wall opening segment splitter ──
+
+function splitByOpenings(x1, y1, x2, y2) {
+  const isH = Math.abs(y1 - y2) < 1;
+  const cuts = [];
+
+  scene.wallOpenings.forEach(wo => {
+    const ox1 = OX + mToP(wo.x1), oy1 = OY + mToP(wo.y1);
+    const ox2 = OX + mToP(wo.x2), oy2 = OY + mToP(wo.y2);
+    const oIsH = Math.abs(oy1 - oy2) < 1;
+
+    if (isH && oIsH && Math.abs(y1 - oy1) < 3) {
+      const oMin = Math.min(ox1, ox2), oMax = Math.max(ox1, ox2);
+      const wMin = Math.min(x1, x2), wMax = Math.max(x1, x2);
+      if (oMax > wMin && oMin < wMax) cuts.push([Math.max(oMin, wMin), Math.min(oMax, wMax)]);
+    } else if (!isH && !oIsH && Math.abs(x1 - ox1) < 3) {
+      const oMin = Math.min(oy1, oy2), oMax = Math.max(oy1, oy2);
+      const wMin = Math.min(y1, y2), wMax = Math.max(y1, y2);
+      if (oMax > wMin && oMin < wMax) cuts.push([Math.max(oMin, wMin), Math.min(oMax, wMax)]);
+    }
+  });
+
+  if (!cuts.length) return [[x1, y1, x2, y2]];
+
+  cuts.sort((a, b) => a[0] - b[0]);
+  const segs = [];
+  if (isH) {
+    let pos = Math.min(x1, x2);
+    const end = Math.max(x1, x2);
+    cuts.forEach(([cs, ce]) => {
+      if (cs > pos + 1) segs.push([pos, y1, cs, y1]);
+      pos = ce;
+    });
+    if (pos < end - 1) segs.push([pos, y1, end, y1]);
+  } else {
+    let pos = Math.min(y1, y2);
+    const end = Math.max(y1, y2);
+    cuts.forEach(([cs, ce]) => {
+      if (cs > pos + 1) segs.push([x1, pos, x1, cs]);
+      pos = ce;
+    });
+    if (pos < end - 1) segs.push([x1, pos, x1, end]);
+  }
+  return segs.length ? segs : [[x1, y1, x2, y2]];
+}
 
 // ── Grid Drawing ──
 
@@ -129,10 +175,30 @@ export function drawEditor() {
     ctx.fillRect(OX + mToP(r.x), OY + mToP(r.y), mToP(r.w), mToP(r.h));
   });
 
-  // Room borders + labels
+  // Room borders + labels — draw walls as segments, skipping openings
   scene.rooms.forEach(r => {
     const rx = OX + mToP(r.x), ry = OY + mToP(r.y), rw = mToP(r.w), rh = mToP(r.h);
-    ctx.strokeStyle = '#222'; ctx.lineWidth = 2.5; ctx.strokeRect(rx, ry, rw, rh);
+    ctx.strokeStyle = '#222'; ctx.lineWidth = 2.5;
+    const walls = [
+      [rx, ry, rx + rw, ry],
+      [rx, ry + rh, rx + rw, ry + rh],
+      [rx, ry, rx, ry + rh],
+      [rx + rw, ry, rx + rw, ry + rh],
+    ];
+    walls.forEach(([x1, y1, x2, y2]) => {
+      const segs = splitByOpenings(x1, y1, x2, y2);
+      segs.forEach(([sx1, sy1, sx2, sy2]) => {
+        ctx.beginPath(); ctx.moveTo(sx1, sy1); ctx.lineTo(sx2, sy2); ctx.stroke();
+      });
+    });
+    // Dashed indicator where openings are
+    scene.wallOpenings.forEach(wo => {
+      const wx1 = OX + mToP(wo.x1), wy1 = OY + mToP(wo.y1);
+      const wx2 = OX + mToP(wo.x2), wy2 = OY + mToP(wo.y2);
+      ctx.strokeStyle = 'rgba(10,94,70,.25)'; ctx.lineWidth = 1.5; ctx.setLineDash([4, 4]);
+      ctx.beginPath(); ctx.moveTo(wx1, wy1); ctx.lineTo(wx2, wy2); ctx.stroke();
+      ctx.setLineDash([]);
+    });
     ctx.fillStyle = '#0a5e46'; ctx.font = 'bold 13px DM Sans'; ctx.textAlign = 'center';
     ctx.fillText(r.w.toFixed(1) + ' m', rx + rw / 2, ry - 6);
     ctx.save(); ctx.translate(rx - 8, ry + rh / 2); ctx.rotate(-Math.PI / 2);
@@ -142,6 +208,49 @@ export function drawEditor() {
     ctx.fillStyle = '#b07030'; ctx.font = 'bold 12px DM Sans';
     ctx.fillText((r.temp || 26) + '°C', rx + rw / 2, ry + 20);
   });
+
+  // Lines (wall lines)
+  scene.lines.forEach(ln => {
+    ctx.strokeStyle = '#222'; ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(OX + mToP(ln.x1), OY + mToP(ln.y1));
+    ctx.lineTo(OX + mToP(ln.x2), OY + mToP(ln.y2));
+    ctx.stroke();
+  });
+
+  // Line preview with dimensions
+  if (editor.lineStart && editor.cursorX > 0) {
+    const sx = OX + mToP(editor.lineStart.x), sy = OY + mToP(editor.lineStart.y);
+    const curMx = Math.max(0, Math.round(pToM(editor.cursorX - OX) / 0.1) * 0.1);
+    const curMy = Math.max(0, Math.round(pToM(editor.cursorY - OY) / 0.1) * 0.1);
+    const dx = Math.abs(curMx - editor.lineStart.x), dy = Math.abs(curMy - editor.lineStart.y);
+    let ex, ey;
+    if (dx >= dy) { ex = curMx; ey = editor.lineStart.y; }
+    else { ex = editor.lineStart.x; ey = curMy; }
+    const epx = OX + mToP(ex), epy = OY + mToP(ey);
+    const len = Math.sqrt((ex - editor.lineStart.x) ** 2 + (ey - editor.lineStart.y) ** 2);
+
+    // Preview line
+    if (len > 0.05) {
+      ctx.strokeStyle = '#1D9E75'; ctx.lineWidth = 2.5; ctx.setLineDash([6, 4]);
+      ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(epx, epy); ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Dimension label
+      const lx = (sx + epx) / 2, ly = (sy + epy) / 2;
+      ctx.fillStyle = '#0a5e46'; ctx.font = 'bold 13px DM Sans'; ctx.textAlign = 'center';
+      const isH = Math.abs(ey - editor.lineStart.y) < 0.01;
+      ctx.fillText(len.toFixed(1) + ' m', lx + (isH ? 0 : -16), ly + (isH ? -10 : 4));
+    }
+
+    // Start point dot
+    ctx.fillStyle = '#0a5e46';
+    ctx.beginPath(); ctx.arc(sx, sy, 4, 0, Math.PI * 2); ctx.fill();
+    // End point dot
+    if (len > 0.05) {
+      ctx.beginPath(); ctx.arc(epx, epy, 3, 0, Math.PI * 2); ctx.fill();
+    }
+  }
 
   // Doors
   scene.doors.forEach(d => {
@@ -247,10 +356,31 @@ function drawHeatmap(ctx) {
 }
 
 function drawSceneOverlays(ctx) {
-  // Room borders
+  // Room borders — draw as individual segments, skipping wall openings
+  ctx.strokeStyle = '#222'; ctx.lineWidth = 2;
   scene.rooms.forEach(r => {
+    const rx = OX + mToP(r.x), ry = OY + mToP(r.y), rw = mToP(r.w), rh = mToP(r.h);
+    const walls = [
+      [rx, ry, rx + rw, ry],
+      [rx, ry + rh, rx + rw, ry + rh],
+      [rx, ry, rx, ry + rh],
+      [rx + rw, ry, rx + rw, ry + rh],
+    ];
+    walls.forEach(([x1, y1, x2, y2]) => {
+      const segs = splitByOpenings(x1, y1, x2, y2);
+      segs.forEach(([sx1, sy1, sx2, sy2]) => {
+        ctx.beginPath(); ctx.moveTo(sx1, sy1); ctx.lineTo(sx2, sy2); ctx.stroke();
+      });
+    });
+  });
+
+  // Lines
+  scene.lines.forEach(ln => {
     ctx.strokeStyle = '#222'; ctx.lineWidth = 2;
-    ctx.strokeRect(OX + mToP(r.x), OY + mToP(r.y), mToP(r.w), mToP(r.h));
+    ctx.beginPath();
+    ctx.moveTo(OX + mToP(ln.x1), OY + mToP(ln.y1));
+    ctx.lineTo(OX + mToP(ln.x2), OY + mToP(ln.y2));
+    ctx.stroke();
   });
 
   // Doors

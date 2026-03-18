@@ -1,7 +1,7 @@
 import {
   FURNITURE_DEFS, scene, canvas, view, editor, pinch, dom,
 } from './state.js';
-import { mToP, pToM, snapGrid, snapGrid2, wallAt, wallNear, isSharedWall, isInsideAnyRoom, getObjectPixels, allBoundingBox } from './utils.js';
+import { mToP, pToM, snapGrid, snapGrid2, wallAt, isSharedWall, isInsideAnyRoom, getObjectPixels, allBoundingBox } from './utils.js';
 import { autoSave } from './storage.js';
 import { checkReady, setTool, syncZoomSlider } from './ui.js';
 
@@ -35,6 +35,35 @@ function tryDeleteAt(mx, my) {
     if (mx > fx && mx < fx + mToP(f.w) && my > fy && my < fy + mToP(f.h)) {
       scene.furniture.splice(i, 1);
       dom.statusMsg.textContent = f.l + ' vymazaný';
+      return true;
+    }
+  }
+  // Lines
+  for (let i = scene.lines.length - 1; i >= 0; i--) {
+    const ln = scene.lines[i];
+    const lx1 = 50 + mToP(ln.x1), ly1 = 36 + mToP(ln.y1);
+    const lx2 = 50 + mToP(ln.x2), ly2 = 36 + mToP(ln.y2);
+    const cx = (lx1 + lx2) / 2, cy = (ly1 + ly2) / 2;
+    // Distance from point to line segment
+    const ldx = lx2 - lx1, ldy = ly2 - ly1, len2 = ldx * ldx + ldy * ldy;
+    let t = len2 > 0 ? ((mx - lx1) * ldx + (my - ly1) * ldy) / len2 : 0;
+    t = Math.max(0, Math.min(1, t));
+    const px = lx1 + t * ldx, py = ly1 + t * ldy;
+    if (Math.sqrt((mx - px) ** 2 + (my - py) ** 2) < 15) {
+      scene.lines.splice(i, 1);
+      dom.statusMsg.textContent = 'Čiara vymazaná';
+      return true;
+    }
+  }
+  // Wall openings
+  for (let i = scene.wallOpenings.length - 1; i >= 0; i--) {
+    const wo = scene.wallOpenings[i];
+    const wx1 = 50 + mToP(wo.x1), wy1 = 36 + mToP(wo.y1);
+    const wx2 = 50 + mToP(wo.x2), wy2 = 36 + mToP(wo.y2);
+    const cx2 = (wx1 + wx2) / 2, cy2 = (wy1 + wy2) / 2;
+    if (Math.sqrt((mx - cx2) ** 2 + (my - cy2) ** 2) < 25) {
+      scene.wallOpenings.splice(i, 1);
+      dom.statusMsg.textContent = 'Spojenie zrušené';
       return true;
     }
   }
@@ -134,12 +163,32 @@ export function setupEditorEvents() {
     const mx = ((e.clientX - rc.left) * (canvas.width / rc.width) - view.x) / view.zoom;
     const my = ((e.clientY - rc.top) * (canvas.height / rc.height) - view.y) / view.zoom;
 
-    if (editor.tool === 'room') {
-      const wd = wallNear(mx, my, view.zoom);
-      if (wd) {
-        editor.wallDrag = { ri: wd.ri, wall: wd.wall, orig: { ...scene.rooms[wd.ri] } };
-        return;
+    if (editor.tool === 'line') {
+      const mxM = snapGrid(pToM(mx - 50)), myM = snapGrid(pToM(my - 36));
+      if (mxM < 0 || myM < 0) return;
+      if (editor.lineStart) {
+        // Second click — create line
+        const s = editor.lineStart;
+        const dx = Math.abs(mxM - s.x), dy = Math.abs(myM - s.y);
+        if (dx >= 0.1 || dy >= 0.1) {
+          let ex, ey;
+          if (dx >= dy) { ex = mxM; ey = s.y; } else { ex = s.x; ey = myM; }
+          scene.lines.push({ x1: s.x, y1: s.y, x2: ex, y2: ey });
+          dom.statusMsg.textContent = 'Čiara pridaná';
+          autoSave();
+        }
+        editor.lineStart = null;
+        editor.clickGuard = Date.now();
+      } else {
+        // First click / pen down — start
+        editor.lineStart = { x: mxM, y: myM };
+        editor.lineDrag = true;
+        dom.statusMsg.textContent = 'Pohni kurzorom a klikni na koniec';
       }
+      return;
+    }
+
+    if (editor.tool === 'room') {
       const mxM = snapGrid(pToM(mx - 50)), myM = snapGrid(pToM(my - 36));
       if (mxM >= 0 && myM >= 0) {
         editor.dragStart = { mx: mxM, my: myM };
@@ -149,7 +198,7 @@ export function setupEditorEvents() {
       return;
     }
 
-    if (['couch', 'bed', 'ward', 'table'].includes(editor.tool)) {
+    if (editor.tool === 'ward') {
       for (let i = scene.furniture.length - 1; i >= 0; i--) {
         const f = scene.furniture[i];
         const fx = 50 + mToP(f.x), fy = 36 + mToP(f.y);
@@ -176,17 +225,6 @@ export function setupEditorEvents() {
     editor.cursorX = ((e.clientX - rc.left) * (canvas.width / rc.width) - view.x) / view.zoom;
     editor.cursorY = ((e.clientY - rc.top) * (canvas.height / rc.height) - view.y) / view.zoom;
 
-    if (editor.wallDrag && editor.mode === 'editor') {
-      const r = scene.rooms[editor.wallDrag.ri], o = editor.wallDrag.orig;
-      const mxM = Math.max(0, snapGrid(pToM(editor.cursorX - 50)));
-      const myM = Math.max(0, snapGrid(pToM(editor.cursorY - 36)));
-      if (editor.wallDrag.wall === 'top') { const ny = Math.min(myM, o.y + o.h - .5); r.y = Math.max(0, ny); r.h = o.y + o.h - r.y; }
-      else if (editor.wallDrag.wall === 'bottom') { r.h = Math.max(.5, myM - o.y); }
-      else if (editor.wallDrag.wall === 'left') { const nx = Math.min(mxM, o.x + o.w - .5); r.x = Math.max(0, nx); r.w = o.x + o.w - r.x; }
-      else { r.w = Math.max(.5, mxM - o.x); }
-      return;
-    }
-
     if (editor.isDragging && editor.mode === 'editor') {
       editor.dragEnd = {
         mx: Math.max(0, snapGrid(pToM(editor.cursorX - 50))),
@@ -205,12 +243,12 @@ export function setupEditorEvents() {
       view.panActive = false;
       if (pinch.wasPinch) {
         editor.isDragging = false; editor.dragStart = null; editor.dragEnd = null;
-        editor.dragFurnIndex = -1; editor.wallDrag = null;
+        editor.dragFurnIndex = -1;
         return;
       }
-      const noAct = !editor.isDragging && !editor.wallDrag;
+      const noAct = !editor.isDragging;
       editor.isDragging = false; editor.dragStart = null; editor.dragEnd = null;
-      editor.dragFurnIndex = -1; editor.wallDrag = null;
+      editor.dragFurnIndex = -1;
       checkReady();
       if (scene.rooms.length) autoSave();
       if (noAct) cv.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: e.clientX, clientY: e.clientY }));
@@ -218,7 +256,26 @@ export function setupEditorEvents() {
     }
 
     if (view.panActive) { view.panActive = false; return; }
-    if (editor.wallDrag) { editor.wallDrag = null; autoSave(); return; }
+
+    // Line tool drag completion (pen / mouse drag)
+    if (editor.tool === 'line' && editor.lineStart && editor.lineDrag) {
+      editor.lineDrag = false;
+      const mxM = snapGrid(pToM(editor.cursorX - 50));
+      const myM = snapGrid(pToM(editor.cursorY - 36));
+      const s = editor.lineStart;
+      const dx = Math.abs(mxM - s.x), dy = Math.abs(myM - s.y);
+      if (dx >= 0.3 || dy >= 0.3) {
+        // Dragged far enough — create line
+        let ex, ey;
+        if (dx >= dy) { ex = mxM; ey = s.y; } else { ex = s.x; ey = myM; }
+        scene.lines.push({ x1: s.x, y1: s.y, x2: ex, y2: ey });
+        editor.lineStart = null;
+        editor.clickGuard = Date.now();
+        dom.statusMsg.textContent = 'Čiara pridaná';
+        autoSave();
+      }
+      // If not dragged far enough, keep lineStart for click-move-click
+    }
 
     if (editor.isDragging && editor.mode === 'editor' && editor.dragStart && editor.dragEnd) {
       const w = Math.abs(editor.dragEnd.mx - editor.dragStart.mx);
@@ -316,6 +373,66 @@ export function setupEditorEvents() {
     }
   }
 
+  function handleWallDeleteClick(mx, my) {
+    // Check if clicking near a line (čiara) — remove it
+    for (let i = scene.lines.length - 1; i >= 0; i--) {
+      const ln = scene.lines[i];
+      const lx1 = 50 + mToP(ln.x1), ly1 = 36 + mToP(ln.y1);
+      const lx2 = 50 + mToP(ln.x2), ly2 = 36 + mToP(ln.y2);
+      const ldx = lx2 - lx1, ldy = ly2 - ly1, len2 = ldx * ldx + ldy * ldy;
+      let t = len2 > 0 ? ((mx - lx1) * ldx + (my - ly1) * ldy) / len2 : 0;
+      t = Math.max(0, Math.min(1, t));
+      const px = lx1 + t * ldx, py = ly1 + t * ldy;
+      if (Math.sqrt((mx - px) ** 2 + (my - py) ** 2) < 20) {
+        scene.lines.splice(i, 1);
+        dom.statusMsg.textContent = 'Čiara odstránená – izby spojené';
+        autoSave();
+        return;
+      }
+    }
+
+    // Then check shared walls between rooms
+    const w = wallAt(mx, my);
+    if (!w) { dom.statusMsg.textContent = 'Klikni na stenu medzi izbami'; return; }
+    if (!isSharedWall(w.ri, w.wall)) {
+      dom.statusMsg.textContent = 'Len zdieľané steny možno spojiť!';
+      return;
+    }
+    // Calculate shared wall segment in meters
+    const r = scene.rooms[w.ri];
+    let edgeVal, axis;
+    if (w.wall === 'top') { edgeVal = r.y; axis = 'h'; }
+    else if (w.wall === 'bottom') { edgeVal = r.y + r.h; axis = 'h'; }
+    else if (w.wall === 'left') { edgeVal = r.x; axis = 'v'; }
+    else { edgeVal = r.x + r.w; axis = 'v'; }
+    // Find the adjacent room
+    for (let j = 0; j < scene.rooms.length; j++) {
+      if (j === w.ri) continue;
+      const o = scene.rooms[j];
+      if (axis === 'h') {
+        if (Math.abs(o.y - edgeVal) < .02 || Math.abs(o.y + o.h - edgeVal) < .02) {
+          const s = Math.max(r.x, o.x), e = Math.min(r.x + r.w, o.x + o.w);
+          if (e > s + .05) {
+            scene.wallOpenings.push({ x1: s, y1: edgeVal, x2: e, y2: edgeVal });
+            dom.statusMsg.textContent = 'Stena odstránená – izby spojené';
+            autoSave();
+            return;
+          }
+        }
+      } else {
+        if (Math.abs(o.x - edgeVal) < .02 || Math.abs(o.x + o.w - edgeVal) < .02) {
+          const s = Math.max(r.y, o.y), e = Math.min(r.y + r.h, o.y + o.h);
+          if (e > s + .05) {
+            scene.wallOpenings.push({ x1: edgeVal, y1: s, x2: edgeVal, y2: e });
+            dom.statusMsg.textContent = 'Stena odstránená – izby spojené';
+            autoSave();
+            return;
+          }
+        }
+      }
+    }
+  }
+
   function handleFurnitureClick(mx, my) {
     if (!isInsideAnyRoom(mx, my)) return;
     const fd = FURNITURE_DEFS[editor.tool];
@@ -336,6 +453,9 @@ export function setupEditorEvents() {
     if (editor.mode !== 'editor') return;
     if (Date.now() - editor.clickGuard < 250) return;
 
+    if (editor.tool === 'line') return; // handled in pointerdown/pointerup
+    if (editor.tool === 'walldelete') { handleWallDeleteClick(mx, my); return; }
+
     if (editor.tool !== 'room' && tryDeleteAt(mx, my)) { checkReady(); autoSave(); return; }
 
     if (editor.tool === 'room') { handleRoomClick(mx, my); return; }
@@ -344,7 +464,7 @@ export function setupEditorEvents() {
     if (editor.tool === 'south' || editor.tool === 'west') { handleSolarClick(mx, my); return; }
     if (editor.tool === 'temp') { handleTempClick(mx, my); return; }
     if (editor.tool === 'win' || editor.tool === 'door' || editor.tool === 'ac') { handleWallToolClick(mx, my); return; }
-    if (['couch', 'bed', 'ward', 'table'].includes(editor.tool)) { handleFurnitureClick(mx, my); }
+    if (editor.tool === 'ward') { handleFurnitureClick(mx, my); }
   });
 
   // Wheel zoom
@@ -366,9 +486,9 @@ export function setupEditorEvents() {
 
   cv.addEventListener('pointerleave', () => {
     editor.cursorX = -1; editor.cursorY = -1;
-    view.panActive = false; editor.wallDrag = null;
+    view.panActive = false;
   });
   cv.addEventListener('pointercancel', () => {
-    view.panActive = false; pinch.active = false; editor.wallDrag = null;
+    view.panActive = false; pinch.active = false;
   });
 }

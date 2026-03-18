@@ -41,6 +41,7 @@ function initUI() {
   dom.clearBtn.onclick = () => {
     scene.rooms = []; scene.windows = []; scene.furniture = [];
     scene.doors = []; scene.acUnits = [];
+    scene.lines = []; scene.wallOpenings = [];
     scene.southSide = null; scene.westSide = null;
     setTool('room'); checkReady();
   };
@@ -79,8 +80,6 @@ function initUI() {
   dom.spreadWidth.oninput = function() { dom.spreadWidthVal.textContent = this.value + '°'; };
   dom.direction.oninput = function() { dom.directionVal.textContent = this.value + '°'; };
   dom.targetMult.oninput = function() { dom.targetMultVal.textContent = (+this.value / 100).toFixed(1) + 'x'; };
-  dom.dampCouch.oninput = function() { dom.dampCouchVal.textContent = '.' + String(this.value).padStart(3, '0').slice(-3); };
-  dom.dampBed.oninput = function() { dom.dampBedVal.textContent = '.' + String(this.value).padStart(3, '0').slice(-3); };
   dom.edgeSoft.oninput = function() { dom.edgeSoftVal.textContent = (+this.value / 10).toFixed(1); };
   dom.diffusion.oninput = function() { dom.diffusionVal.textContent = (+this.value / 100).toFixed(1) + 'x'; };
   dom.sunGain.oninput = function() { dom.sunGainVal.textContent = this.value + '%'; };
