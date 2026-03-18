@@ -1,5 +1,4 @@
 import { scene, dom, editor, sim, view } from './state.js';
-
 import { initSim } from './simulation.js';
 
 /** Check if simulation button should be visible */
@@ -9,23 +8,22 @@ export function checkReady() {
 
 /** Set active editor tool */
 export function setTool(t) {
-  editor.lineStart = null;
   editor.tool = t;
   editor.clickGuard = Date.now();
   dom.toolBtns.forEach(b =>
     b.classList.toggle('active', b.dataset.m === t)
   );
   const messages = {
-    room: 'Ťahaj = nová izba, klik = vymaž izbu',
-    line: 'Klikni na začiatok čiary',
-    walldelete: 'Klikni na zdieľanú stenu pre spojenie izieb',
+    room: 'Ťahaj = nový obdĺžnik (4 steny)',
+    wall: 'Ťahaj = nová stena',
+    delwall: 'Klikni na stenu pre vymazanie',
     win: 'Klikni na stenu pre okno',
     south: 'Klikni kdekoľvek – najbližšia strana = JUH',
     west: 'Klikni kdekoľvek – najbližšia strana = ZÁPAD',
-    door: 'Klikni na zdieľanú stenu pre dvere',
+    door: 'Klikni na stenu pre dvere',
     ac: 'Klikni na stenu pre klimu',
     ward: 'Klikni do izby pre skriňu',
-    temp: 'Klikni na izbu = zmeniť štartovaciu teplotu',
+    temp: 'Klikni na izbu = zmeniť teplotu',
   };
   dom.statusMsg.textContent = messages[t] || '';
 }
@@ -52,7 +50,7 @@ export function switchToEditor() {
   editor.mode = 'editor';
   sim.running = false;
   dom.modeLabel.textContent = 'Editor';
-  dom.statusMsg.textContent = 'Uprav pôdorys';
+  dom.statusMsg.textContent = 'Kresli steny';
   dom.edToolbar.style.display = 'flex';
   dom.simToolbar.style.display = 'none';
   dom.tuneRow.style.display = 'none';

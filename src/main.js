@@ -4,6 +4,7 @@ import { initSim, emitParticles, updateParticles, updateGrid } from './simulatio
 import { setupEditorEvents } from './editor.js';
 import { autoSave, manualSave, load, exportJSON, importJSON } from './storage.js';
 import { setTool, switchToSim, switchToEditor, checkReady, syncZoomSlider } from './ui.js';
+import { detectRooms } from './utils.js';
 
 // ── Initialize canvas ──
 
@@ -32,16 +33,14 @@ function resize() {
 function initUI() {
   cacheDom();
 
-  // Toolbar buttons
   dom.toolBtns.forEach(b => {
     b.onclick = () => setTool(b.dataset.m);
   });
 
-  // Header buttons
   dom.clearBtn.onclick = () => {
-    scene.rooms = []; scene.windows = []; scene.furniture = [];
+    scene.walls = []; scene.rooms = [];
+    scene.windows = []; scene.furniture = [];
     scene.doors = []; scene.acUnits = [];
-    scene.lines = []; scene.wallOpenings = [];
     scene.southSide = null; scene.westSide = null;
     setTool('room'); checkReady();
   };
@@ -54,7 +53,6 @@ function initUI() {
   dom.simBtn.onclick = switchToSim;
   dom.editBtn.onclick = switchToEditor;
 
-  // Simulation controls
   dom.startBtn.onclick = function() {
     if (sim.done) return;
     sim.running = !sim.running;
@@ -66,7 +64,6 @@ function initUI() {
     initSim();
   };
 
-  // Zoom slider
   dom.zoomSlider.oninput = function() {
     const nz = +this.value / 100;
     const cx = canvas.width / 2, cy = canvas.height / 2;
@@ -76,13 +73,12 @@ function initUI() {
     dom.zoomVal.textContent = nz.toFixed(1) + '×';
   };
 
-  // Tuning sliders
-  dom.spreadWidth.oninput = function() { dom.spreadWidthVal.textContent = this.value + '°'; };
-  dom.direction.oninput = function() { dom.directionVal.textContent = this.value + '°'; };
-  dom.targetMult.oninput = function() { dom.targetMultVal.textContent = (+this.value / 100).toFixed(1) + 'x'; };
   dom.edgeSoft.oninput = function() { dom.edgeSoftVal.textContent = (+this.value / 10).toFixed(1); };
   dom.diffusion.oninput = function() { dom.diffusionVal.textContent = (+this.value / 100).toFixed(1) + 'x'; };
   dom.sunGain.oninput = function() { dom.sunGainVal.textContent = this.value + '%'; };
+  dom.spreadWidth.oninput = function() { dom.spreadWidthVal.textContent = this.value + '°'; };
+  dom.direction.oninput = function() { dom.directionVal.textContent = this.value + '°'; };
+  dom.targetMult.oninput = function() { dom.targetMultVal.textContent = (+this.value / 100).toFixed(1) + 'x'; };
 }
 
 // ── Main loop ──

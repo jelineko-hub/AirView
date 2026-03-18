@@ -4,6 +4,7 @@ export const GRID = 0.1;      // grid snap in meters
 export const OX = 50;         // canvas origin X offset
 export const OY = 36;         // canvas origin Y offset
 export const MAX_PARTICLES = 3000;
+export const DETECT_CELL = 0.1; // room detection grid cell size (meters)
 
 export const FURNITURE_DEFS = {
   ward:  { w: 0.6, h: 1.6, label: 'Skriňa',  damping: 1,     solid: true  },
@@ -25,14 +26,13 @@ export const canvas = {
 
 // ── Scene data ──
 export const scene = {
-  rooms: [],
-  windows: [],
-  furniture: [],
-  acUnits: [],
-  doors: [],
-  lines: [],
-  wallOpenings: [],
-  southSide: null,
+  walls: [],        // [{x1, y1, x2, y2}] — primary: all wall segments (meters, H or V)
+  rooms: [],        // [{cells, cx, cy, area, temp}] — auto-detected from walls
+  windows: [],      // [{wi, pos}] — wi=wall index, pos=0-1 along wall
+  furniture: [],    // [{x, y, w, h, l, d, sol}]
+  acUnits: [],      // [{wi, pos, model, mode, on}]
+  doors: [],        // [{wi, pos}]
+  southSide: null,  // 'top'|'bottom'|'left'|'right'
   westSide: null,
 };
 
@@ -63,7 +63,7 @@ export const pinch = {
 // ── Editor interaction state ──
 export const editor = {
   mode: 'editor',  // 'editor' | 'sim'
-  tool: 'room',
+  tool: 'room',    // 'room'|'wall'|'delwall'|'win'|'south'|'west'|'door'|'ac'|'ward'|'temp'
   dragStart: null,
   dragEnd: null,
   isDragging: false,
@@ -72,8 +72,6 @@ export const editor = {
   cursorX: -1,
   cursorY: -1,
   clickGuard: 0,
-  lineStart: null,
-  lineDrag: false,
 };
 
 // ── Simulation state ──

@@ -2,7 +2,7 @@ import {
   PPM, OX, OY, AC_MODELS, MAX_PARTICLES,
   scene, sim, dom, particles, getAndAdvanceParticleHead,
 } from './state.js';
-import { mToP, allBoundingBox, getObjectPixels } from './utils.js';
+import { mToP, allBoundingBox, getObjectPixels, wallDir } from './utils.js';
 import { buildUnitCards } from './ui.js';
 
 // ── Tuning parameter getters (cached DOM) ──
@@ -12,58 +12,24 @@ function getDiffusionFactor() { return +dom.diffusion.value / 100; }
 function getSunGain() { return +dom.sunGain.value / 100; }
 function getTargetMult() { return +dom.targetMult.value / 100; }
 
-// ── Cell helpers ──
+// ── Build wall maps from scene.walls ──
 
-function cellRoom(gx, gy) {
-  const px = sim.bboxX + (gx + .5) * sim.cellSize;
-  const py = sim.bboxY + (gy + .5) * sim.cellSize;
-  for (let i = 0; i < scene.rooms.length; i++) {
-    const r = scene.rooms[i];
-    if (px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h) return i;
-  }
-  return -1;
-}
-
-function cellInDoor(px1, py1, px2, py2) {
+function cellInDoor(px, py) {
   return scene.doors.some(d => {
-    const r = scene.rooms[d.ri];
-    if (!r) return false;
-    let dx, dy;
+    const w = scene.walls[d.wi];
+    if (!w) return false;
+    const isH = wallDir(w) === 'h';
     const hw = .45;
-    if (d.wall === 'top') { dx = r.x + d.pos * r.w; dy = r.y; }
-    else if (d.wall === 'bottom') { dx = r.x + d.pos * r.w; dy = r.y + r.h; }
-    else if (d.wall === 'left') { dx = r.x; dy = r.y + d.pos * r.h; }
-    else { dx = r.x + r.w; dy = r.y + d.pos * r.h; }
-
-    const isH = d.wall === 'top' || d.wall === 'bottom';
-    if (isH) return Math.abs((py1 + py2) / 2 - dy) < sim.cellSize * 2 && (px1 + px2) / 2 > dx - hw && (px1 + px2) / 2 < dx + hw;
-    return Math.abs((px1 + px2) / 2 - dx) < sim.cellSize * 2 && (py1 + py2) / 2 > dy - hw && (py1 + py2) / 2 < dy + hw;
-  });
-}
-
-// ── Build wall maps ──
-
-function cellInWallOpening(px, py) {
-  return scene.wallOpenings.some(wo => {
-    const isH = Math.abs(wo.y1 - wo.y2) < .01;
+    let dx, dy;
     if (isH) {
-      const minX = Math.min(wo.x1, wo.x2), maxX = Math.max(wo.x1, wo.x2);
-      return Math.abs(py - wo.y1) < sim.cellSize * 2 && px >= minX && px <= maxX;
+      dx = Math.min(w.x1, w.x2) + d.pos * Math.abs(w.x2 - w.x1);
+      dy = w.y1;
+    } else {
+      dx = w.x1;
+      dy = Math.min(w.y1, w.y2) + d.pos * Math.abs(w.y2 - w.y1);
     }
-    const minY = Math.min(wo.y1, wo.y2), maxY = Math.max(wo.y1, wo.y2);
-    return Math.abs(px - wo.x1) < sim.cellSize * 2 && py >= minY && py <= maxY;
-  });
-}
-
-function cellOnLine(px, py) {
-  return scene.lines.some(ln => {
-    const isH = Math.abs(ln.y1 - ln.y2) < .01;
-    if (isH) {
-      const minX = Math.min(ln.x1, ln.x2), maxX = Math.max(ln.x1, ln.x2);
-      return Math.abs(py - ln.y1) < sim.cellSize * .6 && px >= minX && px <= maxX;
-    }
-    const minY = Math.min(ln.y1, ln.y2), maxY = Math.max(ln.y1, ln.y2);
-    return Math.abs(px - ln.x1) < sim.cellSize * .6 && py >= minY && py <= maxY;
+    if (isH) return Math.abs(py - dy) < sim.cellSize * 2 && Math.abs(px - dx) < hw;
+    return Math.abs(px - dx) < sim.cellSize * 2 && Math.abs(py - dy) < hw;
   });
 }
 
@@ -72,59 +38,46 @@ function buildWallMaps() {
   sim.wallH = new Uint8Array(gridW * gridH);
   sim.wallV = new Uint8Array(gridW * gridH);
 
-  for (let y = 0; y < gridH; y++) {
-    for (let x = 0; x < gridW; x++) {
-      const px = bboxX + (x + .5) * cellSize;
-      const py = bboxY + (y + .5) * cellSize;
-
-      if (x > 0) {
-        const r1 = cellRoom(x - 1, y), r2 = cellRoom(x, y);
-        if (r1 !== r2 && r1 >= 0 && r2 >= 0) {
-          const px1 = bboxX + (x - .5) * cellSize, py1 = bboxY + (y + .5) * cellSize;
-          const px2 = bboxX + (x + .5) * cellSize, py2 = py1;
-          const inDoor = cellInDoor(px1, py1, px2, py2);
-          const inOpening = cellInWallOpening(px, py);
-          sim.wallH[y * gridW + x] = (inDoor || inOpening) ? 0 : 1;
-        }
-      }
-      if (y > 0) {
-        const r1 = cellRoom(x, y - 1), r2 = cellRoom(x, y);
-        if (r1 !== r2 && r1 >= 0 && r2 >= 0) {
-          const px1 = bboxX + (x + .5) * cellSize, py1 = bboxY + (y - .5) * cellSize;
-          const px2 = px1, py2 = bboxY + (y + .5) * cellSize;
-          const inDoor = cellInDoor(px1, py1, px2, py2);
-          const inOpening = cellInWallOpening(px, py);
-          sim.wallV[y * gridW + x] = (inDoor || inOpening) ? 0 : 1;
-        }
-      }
-    }
-  }
-
-  // Add line walls
-  scene.lines.forEach(ln => {
-    const isH = Math.abs(ln.y1 - ln.y2) < .01;
+  // For each wall segment, mark grid edges
+  scene.walls.forEach(w => {
+    const isH = wallDir(w) === 'h';
     if (isH) {
-      const gy = Math.round((ln.y1 - bboxY) / cellSize);
-      const gx1 = Math.floor((Math.min(ln.x1, ln.x2) - bboxX) / cellSize);
-      const gx2 = Math.ceil((Math.max(ln.x1, ln.x2) - bboxX) / cellSize);
-      for (let x = Math.max(0, gx1); x <= Math.min(gridW - 1, gx2); x++) {
-        if (gy >= 0 && gy < gridH) sim.wallV[gy * gridW + x] = 1;
+      const wy = w.y1;
+      const minX = Math.min(w.x1, w.x2), maxX = Math.max(w.x1, w.x2);
+      const gy = Math.round((wy - bboxY) / cellSize);
+      if (gy < 0 || gy >= gridH) return;
+      const gx1 = Math.max(0, Math.floor((minX - bboxX) / cellSize));
+      const gx2 = Math.min(gridW - 1, Math.ceil((maxX - bboxX) / cellSize));
+      for (let x = gx1; x <= gx2; x++) {
+        const px = bboxX + (x + .5) * cellSize;
+        const py = wy;
+        if (!cellInDoor(px, py)) {
+          sim.wallV[gy * gridW + x] = 1;
+        }
       }
     } else {
-      const gx = Math.round((ln.x1 - bboxX) / cellSize);
-      const gy1 = Math.floor((Math.min(ln.y1, ln.y2) - bboxY) / cellSize);
-      const gy2 = Math.ceil((Math.max(ln.y1, ln.y2) - bboxY) / cellSize);
-      for (let y = Math.max(0, gy1); y <= Math.min(gridH - 1, gy2); y++) {
-        if (gx >= 0 && gx < gridW) sim.wallH[y * gridW + gx] = 1;
+      const wx = w.x1;
+      const minY = Math.min(w.y1, w.y2), maxY = Math.max(w.y1, w.y2);
+      const gx = Math.round((wx - bboxX) / cellSize);
+      if (gx < 0 || gx >= gridW) return;
+      const gy1 = Math.max(0, Math.floor((minY - bboxY) / cellSize));
+      const gy2 = Math.min(gridH - 1, Math.ceil((maxY - bboxY) / cellSize));
+      for (let y = gy1; y <= gy2; y++) {
+        const px = wx;
+        const py = bboxY + (y + .5) * cellSize;
+        if (!cellInDoor(px, py)) {
+          sim.wallH[y * gridW + gx] = 1;
+        }
       }
     }
   });
 }
 
-// ── Build simulation maps ──
+// ── Build simulation maps from detected rooms ──
 
 function buildSimMaps() {
   const bb = allBoundingBox();
+  if (!bb) return;
   sim.bboxX = bb.x;
   sim.bboxY = bb.y;
   sim.gridW = Math.ceil(bb.w / sim.cellSize);
@@ -137,20 +90,25 @@ function buildSimMaps() {
   sim.furnitureEdge = new Float32Array(gridW * gridH);
   sim.externalTemp = new Float32Array(gridW * gridH);
   sim.externalCoeff = new Float32Array(gridW * gridH);
-
   sim.cellRoomMap = new Int16Array(gridW * gridH);
+  sim.cellRoomMap.fill(-1);
+
   const roomCellCount = [];
   for (let i = 0; i < scene.rooms.length; i++) roomCellCount.push(0);
 
-  for (let x = 0; x < gridW; x++) {
-    for (let y = 0; y < gridH; y++) {
-      const ri = cellRoom(x, y);
-      const idx = y * gridW + x;
-      sim.cellRoomMap[idx] = ri;
-      sim.airMap[idx] = ri >= 0 ? 1 : 0;
-      if (ri >= 0) roomCellCount[ri]++;
-    }
-  }
+  // Map detected room cells to simulation grid
+  scene.rooms.forEach((r, ri) => {
+    r.cells.forEach(c => {
+      const gx = Math.floor((c.x - bboxX) / cellSize);
+      const gy = Math.floor((c.y - bboxY) / cellSize);
+      if (gx >= 0 && gx < gridW && gy >= 0 && gy < gridH) {
+        const idx = gy * gridW + gx;
+        sim.airMap[idx] = 1;
+        sim.cellRoomMap[idx] = ri;
+        roomCellCount[ri]++;
+      }
+    });
+  });
   sim.roomCellCount = roomCellCount;
 
   buildWallMaps();
@@ -222,23 +180,29 @@ function buildSimMaps() {
     }
 
     // Window heat
-    scene.windows.forEach(w => {
-      if (w.wall !== side) return;
-      const r = scene.rooms[w.ri];
-      if (!r) return;
+    scene.windows.forEach(win => {
+      const wall = scene.walls[win.wi];
+      if (!wall) return;
+      const wSide = getWallSide(wall);
+      if (wSide !== side) return;
+
+      // Get window world position
+      const isH = wallDir(wall) === 'h';
+      const wx = Math.min(wall.x1, wall.x2) + win.pos * Math.abs(wall.x2 - wall.x1);
+      const wy = Math.min(wall.y1, wall.y2) + win.pos * Math.abs(wall.y2 - wall.y1);
+
       for (let y = 0; y < gridH; y++) {
         for (let x = 0; x < gridW; x++) {
           if (!sim.airMap[y * gridW + x]) continue;
-          const px = (x + .5) * cellSize + bboxX - r.x;
-          const py = (y + .5) * cellSize + bboxY - r.y;
-          let dist, along;
-          if (w.wall === 'right') { dist = r.w - px; along = py / r.h; }
-          else if (w.wall === 'left') { dist = px; along = py / r.h; }
-          else if (w.wall === 'bottom') { dist = r.h - py; along = px / r.w; }
-          else { dist = py; along = px / r.w; }
+          const px = (x + .5) * cellSize + bboxX;
+          const py = (y + .5) * cellSize + bboxY;
+          let dist;
+          if (isH) dist = Math.abs(py - wy);
+          else dist = Math.abs(px - wx);
 
           if (dist > 4) continue;
-          const band = Math.exp(-Math.pow((along - w.pos) / .15, 2));
+          const along = isH ? (px - wx) : (py - wy);
+          const band = Math.exp(-Math.pow(along / (.15 * Math.max(bb.w, bb.h)), 2));
           const decay2 = Math.pow(Math.max(0, 1 - dist / 4), 1.3) * band;
           const k = winK * decay2;
           const i = y * gridW + x;
@@ -257,6 +221,20 @@ function buildSimMaps() {
   addHeatSide(scene.westSide, +dom.extWest.value, 0.65);
 }
 
+function getWallSide(w) {
+  const bb = allBoundingBox();
+  if (!bb) return null;
+  const isH = wallDir(w) === 'h';
+  if (isH) {
+    if (Math.abs(w.y1 - bb.y) < 0.02) return 'top';
+    if (Math.abs(w.y1 - (bb.y + bb.h)) < 0.02) return 'bottom';
+  } else {
+    if (Math.abs(w.x1 - bb.x) < 0.02) return 'left';
+    if (Math.abs(w.x1 - (bb.x + bb.w)) < 0.02) return 'right';
+  }
+  return null;
+}
+
 // ── Initialize simulation ──
 
 export function initSim() {
@@ -272,7 +250,7 @@ export function initSim() {
     for (let y = 0; y < gridH; y++) {
       const i = y * gridW + x;
       if (!sim.airMap[i]) { sim.tempGrid[i] = 20; continue; }
-      const ri = cellRoom(x, y);
+      const ri = sim.cellRoomMap[i];
       const baseTemp = ri >= 0 && scene.rooms[ri].temp ? scene.rooms[ri].temp : 26;
       const extPull = sim.externalCoeff[i] > 0
         ? Math.max(0, (sim.externalTemp[i] - baseTemp) * sg * 8 * sim.externalCoeff[i])
@@ -323,29 +301,42 @@ export function initSim() {
 // ── AC unit helpers ──
 
 function getUnitPixelPos(u) {
-  const r = scene.rooms[u.ri];
-  const rx = OX + mToP(r.x), ry = OY + mToP(r.y), rw = mToP(r.w), rh = mToP(r.h);
-  if (u.wall === 'top') return [rx + u.pos * rw, ry];
-  if (u.wall === 'bottom') return [rx + u.pos * rw, ry + rh];
-  if (u.wall === 'left') return [rx, ry + u.pos * rh];
-  return [rx + rw, ry + u.pos * rh];
+  const w = scene.walls[u.wi];
+  if (!w) return [0, 0];
+  const wx1 = OX + mToP(w.x1), wy1 = OY + mToP(w.y1);
+  const wx2 = OX + mToP(w.x2), wy2 = OY + mToP(w.y2);
+  return [wx1 + u.pos * (wx2 - wx1), wy1 + u.pos * (wy2 - wy1)];
 }
 
 function getUnitBaseAngle(u) {
-  return u.wall === 'top' ? Math.PI / 2 : u.wall === 'bottom' ? -Math.PI / 2 : u.wall === 'left' ? 0 : Math.PI;
+  const w = scene.walls[u.wi];
+  if (!w) return 0;
+  const isH = wallDir(w) === 'h';
+  const bb = allBoundingBox();
+  if (isH) return bb && w.y1 < bb.y + bb.h / 2 ? Math.PI / 2 : -Math.PI / 2;
+  return bb && w.x1 < bb.x + bb.w / 2 ? 0 : Math.PI;
 }
 
 function getRoomAvgTemp(u) {
-  const ri = u.ri;
-  if (ri < 0 || ri >= scene.rooms.length) return 25;
+  // Find which room the AC unit faces
+  const [ax, ay] = getUnitPixelPos(u);
+  const w = scene.walls[u.wi];
+  if (!w) return 25;
+  const ba = getUnitBaseAngle(u);
+  // Check the cell slightly inward from the wall
+  const checkX = ax + Math.cos(ba) * 20;
+  const checkY = ay + Math.sin(ba) * 20;
+  const gx = Math.floor((checkX - sim.renderX) / (sim.cellSize * PPM));
+  const gy = Math.floor((checkY - sim.renderY) / (sim.cellSize * PPM));
+  if (gx < 0 || gx >= sim.gridW || gy < 0 || gy >= sim.gridH) return 25;
+  const ri = sim.cellRoomMap[gy * sim.gridW + gx];
+  if (ri < 0) return 25;
   const cnt = sim.roomCellCount[ri];
   if (!cnt) return 25;
   const { gridW, gridH, cellRoomMap, furnitureSolid, tempGrid } = sim;
   let s = 0;
   for (let i = 0, len = gridW * gridH; i < len; i++) {
-    if (cellRoomMap[i] === ri && !furnitureSolid[i]) {
-      s += tempGrid[i];
-    }
+    if (cellRoomMap[i] === ri && !furnitureSolid[i]) s += tempGrid[i];
   }
   return s / cnt;
 }
@@ -354,16 +345,13 @@ function calcUnitOutput(u, ui) {
   const mo = u.mode;
   const tgt = +dom.targetTemp.value;
   const diff = Math.max(0, sim.unitRoomTemp[ui] - tgt);
-
   if (mo === 2) return { pow: 1.35, outT: Math.max(tgt - 8, tgt - diff * 1.5) };
   const maxPow = mo === 0 ? .6 : 1, minPow = mo === 0 ? .1 : .15;
   let fp, ot;
-
   if (diff > 4) { fp = maxPow; ot = tgt - Math.min(diff * 1.5, 8); }
   else if (diff > 1) { fp = minPow + (maxPow - minPow) * (diff - 1) / 3; ot = tgt - diff * 1.5; }
   else if (diff > 0) { fp = minPow; ot = tgt - Math.max(diff * 1.2, .5); }
   else { fp = minPow; ot = tgt - .5; }
-
   return { pow: fp, outT: Math.max(ot, tgt - 8) };
 }
 
@@ -377,11 +365,12 @@ function createParticle(u, ui) {
   const pw = Math.max(sim.unitPower[ui], .2);
   const uw = m.width * (PPM / 100);
   const off = (Math.random() - .5) * uw;
-  const isH = u.wall === 'top' || u.wall === 'bottom';
+  const w = scene.walls[u.wi];
+  const isH = w && wallDir(w) === 'h';
 
   let px, py;
-  if (isH) { px = ax + off; py = ay + (u.wall === 'top' ? 10 : -10); }
-  else { px = ax + (u.wall === 'left' ? 10 : -10); py = ay + off; }
+  if (isH) { px = ax + off; py = ay + (ba > 0 ? 10 : -10); }
+  else { px = ax + (ba === 0 ? 10 : -10); py = ay + off; }
 
   const dr = +dom.direction.value * Math.PI / 180;
   const ha = (+dom.spreadWidth.value / 2) * Math.PI / 180;
@@ -422,21 +411,20 @@ export function emitParticles() {
   });
 }
 
-// ── Particle door check ──
+// ── Particle collision ──
 
 function isParticleInDoor(px, py) {
   return scene.doors.some(d => {
-    const r = scene.rooms[d.ri];
-    if (!r) return false;
+    const w = scene.walls[d.wi];
+    if (!w) return false;
+    const isH = wallDir(w) === 'h';
     const hw = .45 * PPM;
-    let dx, dy;
-    if (d.wall === 'top') { dx = OX + mToP(r.x + d.pos * r.w); dy = OY + mToP(r.y); }
-    else if (d.wall === 'bottom') { dx = OX + mToP(r.x + d.pos * r.w); dy = OY + mToP(r.y + r.h); }
-    else if (d.wall === 'left') { dx = OX + mToP(r.x); dy = OY + mToP(r.y + d.pos * r.h); }
-    else { dx = OX + mToP(r.x + r.w); dy = OY + mToP(r.y + d.pos * r.h); }
-
-    const isH = d.wall === 'top' || d.wall === 'bottom';
-    return isH ? Math.abs(py - dy) < 8 && Math.abs(px - dx) < hw : Math.abs(px - dx) < 8 && Math.abs(py - dy) < hw;
+    const wx1 = OX + mToP(w.x1), wy1 = OY + mToP(w.y1);
+    const wx2 = OX + mToP(w.x2), wy2 = OY + mToP(w.y2);
+    const dx = wx1 + d.pos * (wx2 - wx1);
+    const dy = wy1 + d.pos * (wy2 - wy1);
+    if (isH) return Math.abs(py - dy) < 8 && Math.abs(px - dx) < hw;
+    return Math.abs(px - dx) < 8 && Math.abs(py - dy) < hw;
   });
 }
 
@@ -452,7 +440,6 @@ function wallBetween(ox, oy, nx, ny) {
   const ogx = Math.floor((ox - sim.renderX) / cpx), ogy = Math.floor((oy - sim.renderY) / cpx);
   const ngx = Math.floor((nx - sim.renderX) / cpx), ngy = Math.floor((ny - sim.renderY) / cpx);
   if (ogx === ngx && ogy === ngy) return 0;
-
   if (ogx !== ngx && ogy === ngy) {
     const wx = Math.max(ogx, ngx);
     if (wx >= 0 && wx < sim.gridW && ogy >= 0 && ogy < sim.gridH && sim.wallH[ogy * sim.gridW + wx]) return 1;
@@ -468,8 +455,6 @@ function wallBetween(ox, oy, nx, ny) {
   }
   return 0;
 }
-
-// ── Update particles ──
 
 function collideParticleFurniture(p) {
   for (const f of scene.furniture) {
@@ -543,7 +528,6 @@ export function updateParticles() {
     p.vx *= .992; p.vy *= .992;
     p.vx += (Math.random() - .5) * .05; p.vy += (Math.random() - .5) * .05;
 
-    // Track back to source
     const [ax, ay] = getUnitPixelPos(u);
     const dx = ax - p.x, dy = ay - p.y, d = Math.sqrt(dx * dx + dy * dy);
     if (d > 60 && p.age > 25) { p.vx += dx / d * .008; p.vy += dy / d * .006; }
@@ -572,7 +556,6 @@ export function updateGrid() {
   const df = (.03 + progress * .04) * dfM;
   const passes = Math.max(1, Math.round((2 + Math.floor(progress * 2)) * dfM));
 
-  // Neighbor offsets: [dx, dy, weight] — precomputed outside loop
   const NB_DX = [-1, 1, 0, 0, -1, 1, -1, 1];
   const NB_DY = [0, 0, -1, 1, -1, -1, 1, 1];
   const NB_W  = [1, 1, 1, 1, .7, .7, .7, .7];
@@ -584,7 +567,6 @@ export function updateGrid() {
         const i = y * gridW + x;
         if (!sim.airMap[i] || sim.furnitureSolid[i]) continue;
         let s = 0, c = 0;
-
         for (let n = 0; n < 8; n++) {
           const nx = x + NB_DX[n], ny = y + NB_DY[n];
           if (nx < 0 || nx >= gridW || ny < 0 || ny >= gridH) continue;
@@ -598,7 +580,6 @@ export function updateGrid() {
           }
           s += sim.tempBuffer[ni] * NB_W[n]; c += NB_W[n];
         }
-
         if (c > 0) {
           const ef = sim.furnitureEdge[i];
           const ld = df * (1 - ef * .1 * Math.min(es, 2));
@@ -608,7 +589,6 @@ export function updateGrid() {
     }
   }
 
-  // Sun heat
   if (sg > 0 && (scene.southSide || scene.westSide)) {
     for (let i = 0; i < gridW * gridH; i++) {
       if (sim.airMap[i] && !sim.furnitureSolid[i] && sim.externalCoeff[i] > 0) {
@@ -618,7 +598,6 @@ export function updateGrid() {
     }
   }
 
-  // Advance clock
   sim.elapsed += 2;
   dom.clock.textContent =
     String(Math.floor(sim.elapsed / 60)).padStart(2, '0') + ':' +

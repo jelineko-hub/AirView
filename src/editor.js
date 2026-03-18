@@ -1,9 +1,33 @@
 import {
   FURNITURE_DEFS, scene, canvas, view, editor, pinch, dom,
 } from './state.js';
-import { mToP, pToM, snapGrid, snapGrid2, wallAt, isSharedWall, isInsideAnyRoom, getObjectPixels, allBoundingBox } from './utils.js';
+import { mToP, pToM, snapGrid, snapGrid2, wallAtPixel, detectRooms, isInsideAnyRoom, getObjectPixels, allBoundingBox, roomAtMeter } from './utils.js';
 import { autoSave } from './storage.js';
 import { checkReady, setTool, syncZoomSlider } from './ui.js';
+
+// ── Helpers ──
+
+function addWall(x1, y1, x2, y2) {
+  scene.walls.push({ x1, y1, x2, y2 });
+}
+
+function removeWallAndRefs(wi) {
+  // Remove objects referencing this wall
+  scene.windows = scene.windows.filter(o => o.wi !== wi);
+  scene.doors = scene.doors.filter(o => o.wi !== wi);
+  scene.acUnits = scene.acUnits.filter(o => o.wi !== wi);
+  // Adjust indices for objects on walls after the removed one
+  scene.windows.forEach(o => { if (o.wi > wi) o.wi--; });
+  scene.doors.forEach(o => { if (o.wi > wi) o.wi--; });
+  scene.acUnits.forEach(o => { if (o.wi > wi) o.wi--; });
+  scene.walls.splice(wi, 1);
+}
+
+function afterWallChange() {
+  detectRooms();
+  checkReady();
+  autoSave();
+}
 
 // ── Delete object at click position ──
 
@@ -31,55 +55,24 @@ function tryDeleteAt(mx, my) {
   // Furniture
   for (let i = scene.furniture.length - 1; i >= 0; i--) {
     const f = scene.furniture[i];
-    const fx = 50 + mToP(f.x), fy = 36 + mToP(f.y);  // OX=50, OY=36
+    const fx = 50 + mToP(f.x), fy = 36 + mToP(f.y);
     if (mx > fx && mx < fx + mToP(f.w) && my > fy && my < fy + mToP(f.h)) {
       scene.furniture.splice(i, 1);
       dom.statusMsg.textContent = f.l + ' vymazaný';
       return true;
     }
   }
-  // Lines
-  for (let i = scene.lines.length - 1; i >= 0; i--) {
-    const ln = scene.lines[i];
-    const lx1 = 50 + mToP(ln.x1), ly1 = 36 + mToP(ln.y1);
-    const lx2 = 50 + mToP(ln.x2), ly2 = 36 + mToP(ln.y2);
-    const cx = (lx1 + lx2) / 2, cy = (ly1 + ly2) / 2;
-    // Distance from point to line segment
-    const ldx = lx2 - lx1, ldy = ly2 - ly1, len2 = ldx * ldx + ldy * ldy;
-    let t = len2 > 0 ? ((mx - lx1) * ldx + (my - ly1) * ldy) / len2 : 0;
-    t = Math.max(0, Math.min(1, t));
-    const px = lx1 + t * ldx, py = ly1 + t * ldy;
-    if (Math.sqrt((mx - px) ** 2 + (my - py) ** 2) < 15) {
-      scene.lines.splice(i, 1);
-      dom.statusMsg.textContent = 'Čiara vymazaná';
-      return true;
-    }
-  }
-  // Wall openings
-  for (let i = scene.wallOpenings.length - 1; i >= 0; i--) {
-    const wo = scene.wallOpenings[i];
-    const wx1 = 50 + mToP(wo.x1), wy1 = 36 + mToP(wo.y1);
-    const wx2 = 50 + mToP(wo.x2), wy2 = 36 + mToP(wo.y2);
-    const cx2 = (wx1 + wx2) / 2, cy2 = (wy1 + wy2) / 2;
-    if (Math.sqrt((mx - cx2) ** 2 + (my - cy2) ** 2) < 25) {
-      scene.wallOpenings.splice(i, 1);
-      dom.statusMsg.textContent = 'Spojenie zrušené';
-      return true;
-    }
-  }
   // AC Units
   for (let i = scene.acUnits.length - 1; i >= 0; i--) {
-    const u = scene.acUnits[i], r = scene.rooms[u.ri];
-    if (!r) continue;
-    const rx = 50 + mToP(r.x), ry = 36 + mToP(r.y), rw = mToP(r.w), rh = mToP(r.h);
-    let ax, ay;
-    if (u.wall === 'top') { ax = rx + u.pos * rw; ay = ry; }
-    else if (u.wall === 'bottom') { ax = rx + u.pos * rw; ay = ry + rh; }
-    else if (u.wall === 'left') { ax = rx; ay = ry + u.pos * rh; }
-    else { ax = rx + rw; ay = ry + u.pos * rh; }
+    const u = scene.acUnits[i];
+    const w = scene.walls[u.wi];
+    if (!w) continue;
+    const p = getObjectPixels('ac', u);
+    if (!p) continue;
+    const ax = (p.x1 + p.x2) / 2, ay = (p.y1 + p.y2) / 2;
     if (Math.sqrt((mx - ax) ** 2 + (my - ay) ** 2) < 35) {
       scene.acUnits.splice(i, 1);
-      dom.statusMsg.textContent = 'Klima #' + (i + 1) + ' vymazaná';
+      dom.statusMsg.textContent = 'Klima vymazaná';
       checkReady();
       return true;
     }
@@ -163,31 +156,7 @@ export function setupEditorEvents() {
     const mx = ((e.clientX - rc.left) * (canvas.width / rc.width) - view.x) / view.zoom;
     const my = ((e.clientY - rc.top) * (canvas.height / rc.height) - view.y) / view.zoom;
 
-    if (editor.tool === 'line') {
-      const mxM = snapGrid(pToM(mx - 50)), myM = snapGrid(pToM(my - 36));
-      if (mxM < 0 || myM < 0) return;
-      if (editor.lineStart) {
-        // Second click — create line
-        const s = editor.lineStart;
-        const dx = Math.abs(mxM - s.x), dy = Math.abs(myM - s.y);
-        if (dx >= 0.1 || dy >= 0.1) {
-          let ex, ey;
-          if (dx >= dy) { ex = mxM; ey = s.y; } else { ex = s.x; ey = myM; }
-          scene.lines.push({ x1: s.x, y1: s.y, x2: ex, y2: ey });
-          dom.statusMsg.textContent = 'Čiara pridaná';
-          autoSave();
-        }
-        editor.lineStart = null;
-        editor.clickGuard = Date.now();
-      } else {
-        // First click / pen down — start
-        editor.lineStart = { x: mxM, y: myM };
-        editor.lineDrag = true;
-        dom.statusMsg.textContent = 'Pohni kurzorom a klikni na koniec';
-      }
-      return;
-    }
-
+    // Room tool: drag to create 4 walls (rectangle)
     if (editor.tool === 'room') {
       const mxM = snapGrid(pToM(mx - 50)), myM = snapGrid(pToM(my - 36));
       if (mxM >= 0 && myM >= 0) {
@@ -198,6 +167,18 @@ export function setupEditorEvents() {
       return;
     }
 
+    // Wall tool: drag to create 1 wall segment
+    if (editor.tool === 'wall') {
+      const mxM = snapGrid(pToM(mx - 50)), myM = snapGrid(pToM(my - 36));
+      if (mxM >= 0 && myM >= 0) {
+        editor.dragStart = { mx: mxM, my: myM };
+        editor.isDragging = true;
+        editor.dragEnd = { mx: mxM, my: myM };
+      }
+      return;
+    }
+
+    // Furniture drag
     if (editor.tool === 'ward') {
       for (let i = scene.furniture.length - 1; i >= 0; i--) {
         const f = scene.furniture[i];
@@ -249,76 +230,62 @@ export function setupEditorEvents() {
       const noAct = !editor.isDragging;
       editor.isDragging = false; editor.dragStart = null; editor.dragEnd = null;
       editor.dragFurnIndex = -1;
-      checkReady();
-      if (scene.rooms.length) autoSave();
+      if (scene.walls.length) autoSave();
       if (noAct) cv.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: e.clientX, clientY: e.clientY }));
       return;
     }
 
     if (view.panActive) { view.panActive = false; return; }
 
-    // Line tool drag completion (pen / mouse drag)
-    if (editor.tool === 'line' && editor.lineStart && editor.lineDrag) {
-      editor.lineDrag = false;
-      const mxM = snapGrid(pToM(editor.cursorX - 50));
-      const myM = snapGrid(pToM(editor.cursorY - 36));
-      const s = editor.lineStart;
-      const dx = Math.abs(mxM - s.x), dy = Math.abs(myM - s.y);
-      if (dx >= 0.3 || dy >= 0.3) {
-        // Dragged far enough — create line
-        let ex, ey;
-        if (dx >= dy) { ex = mxM; ey = s.y; } else { ex = s.x; ey = myM; }
-        scene.lines.push({ x1: s.x, y1: s.y, x2: ex, y2: ey });
-        editor.lineStart = null;
-        editor.clickGuard = Date.now();
-        dom.statusMsg.textContent = 'Čiara pridaná';
-        autoSave();
-      }
-      // If not dragged far enough, keep lineStart for click-move-click
-    }
-
     if (editor.isDragging && editor.mode === 'editor' && editor.dragStart && editor.dragEnd) {
-      const w = Math.abs(editor.dragEnd.mx - editor.dragStart.mx);
-      const h = Math.abs(editor.dragEnd.my - editor.dragStart.my);
-      if (w >= .5 && h >= .5) {
-        scene.rooms.push({
-          x: Math.min(editor.dragStart.mx, editor.dragEnd.mx),
-          y: Math.min(editor.dragStart.my, editor.dragEnd.my),
-          w, h, temp: 26,
-        });
-        dom.statusMsg.textContent = 'Izba #' + scene.rooms.length + ' pridaná';
-        editor.clickGuard = Date.now();
+      const s = editor.dragStart, en = editor.dragEnd;
+
+      if (editor.tool === 'room') {
+        // Create 4 walls forming a rectangle
+        const w = Math.abs(en.mx - s.mx), h = Math.abs(en.my - s.my);
+        if (w >= .5 && h >= .5) {
+          const x1 = Math.min(s.mx, en.mx), y1 = Math.min(s.my, en.my);
+          const x2 = x1 + w, y2 = y1 + h;
+          addWall(x1, y1, x2, y1); // top
+          addWall(x1, y2, x2, y2); // bottom
+          addWall(x1, y1, x1, y2); // left
+          addWall(x2, y1, x2, y2); // right
+          dom.statusMsg.textContent = 'Obdĺžnik pridaný (' + w.toFixed(1) + ' × ' + h.toFixed(1) + ' m)';
+          editor.clickGuard = Date.now();
+          afterWallChange();
+        }
+      } else if (editor.tool === 'wall') {
+        // Create 1 wall segment (constrain to H or V)
+        const dx = Math.abs(en.mx - s.mx), dy = Math.abs(en.my - s.my);
+        if (dx >= 0.2 || dy >= 0.2) {
+          let ex, ey;
+          if (dx >= dy) { ex = en.mx; ey = s.my; }
+          else { ex = s.mx; ey = en.my; }
+          addWall(s.mx, s.my, ex, ey);
+          const len = Math.sqrt((ex - s.mx) ** 2 + (ey - s.my) ** 2);
+          dom.statusMsg.textContent = 'Stena pridaná (' + len.toFixed(1) + ' m)';
+          editor.clickGuard = Date.now();
+          afterWallChange();
+        }
       }
     }
 
     editor.isDragging = false; editor.dragStart = null; editor.dragEnd = null;
     editor.dragFurnIndex = -1;
-    checkReady();
-    if (scene.rooms.length) autoSave();
   });
 
-  // Click handler (tools) — dispatched per tool
-  function handleRoomClick(mx, my) {
-    for (let i = scene.rooms.length - 1; i >= 0; i--) {
-      const r = scene.rooms[i];
-      const rx = 50 + mToP(r.x), ry = 36 + mToP(r.y), rw = mToP(r.w), rh = mToP(r.h);
-      if (mx > rx && mx < rx + rw && my > ry && my < ry + rh) {
-        scene.windows = scene.windows.filter(w => w.ri !== i);
-        scene.doors = scene.doors.filter(d => d.ri !== i);
-        scene.acUnits = scene.acUnits.filter(u => u.ri !== i);
-        scene.windows.forEach(w => { if (w.ri > i) w.ri--; });
-        scene.doors.forEach(d => { if (d.ri > i) d.ri--; });
-        scene.acUnits.forEach(u => { if (u.ri > i) u.ri--; });
-        scene.rooms.splice(i, 1);
-        dom.statusMsg.textContent = 'Izba vymazaná';
-        checkReady(); autoSave();
-        return;
-      }
-    }
+  // Click handler (tools)
+  function handleDeleteWallClick(mx, my) {
+    const hit = wallAtPixel(mx, my);
+    if (!hit) { dom.statusMsg.textContent = 'Klikni na stenu'; return; }
+    removeWallAndRefs(hit.wi);
+    dom.statusMsg.textContent = 'Stena vymazaná';
+    afterWallChange();
   }
 
   function handleSolarClick(mx, my) {
     const bb = allBoundingBox();
+    if (!bb) return;
     const bx = 50 + mToP(bb.x), by = 36 + mToP(bb.y), bw = mToP(bb.w), bh = mToP(bb.h);
     const cx2 = bx + bw / 2, cy2 = by + bh / 2, dx2 = mx - cx2, dy2 = my - cy2;
     let side;
@@ -339,97 +306,32 @@ export function setupEditorEvents() {
   }
 
   function handleTempClick(mx, my) {
-    for (let i = scene.rooms.length - 1; i >= 0; i--) {
-      const r = scene.rooms[i];
-      const rx = 50 + mToP(r.x), ry = 36 + mToP(r.y), rw = mToP(r.w), rh = mToP(r.h);
-      if (mx > rx && mx < rx + rw && my > ry && my < ry + rh) {
-        const temps = [22, 24, 26, 28, 30, 32, 34];
-        const ci = temps.indexOf(r.temp || 26);
-        r.temp = temps[(ci + 1) % temps.length];
-        dom.statusMsg.textContent = 'Izba #' + (i + 1) + ': ' + r.temp + '°C';
-        autoSave();
-        return;
-      }
-    }
+    const mxM = pToM(mx - 50), myM = pToM(my - 36);
+    const ri = roomAtMeter(mxM, myM);
+    if (ri < 0) return;
+    const r = scene.rooms[ri];
+    const temps = [22, 24, 26, 28, 30, 32, 34];
+    const ci = temps.indexOf(r.temp || 26);
+    r.temp = temps[(ci + 1) % temps.length];
+    dom.statusMsg.textContent = 'Izba: ' + r.temp + '°C';
+    autoSave();
   }
 
   function handleWallToolClick(mx, my) {
-    const w = wallAt(mx, my);
-    if (!w) return;
+    const hit = wallAtPixel(mx, my);
+    if (!hit) return;
     if (editor.tool === 'win') {
-      scene.windows.push({ ri: w.ri, wall: w.wall, pos: w.pos });
-      dom.statusMsg.textContent = 'Okno pridané'; checkReady(); autoSave();
-    } else if (editor.tool === 'door') {
-      if (isSharedWall(w.ri, w.wall)) {
-        scene.doors.push({ ri: w.ri, wall: w.wall, pos: w.pos });
-        dom.statusMsg.textContent = 'Dvere pridané'; autoSave();
-      } else {
-        dom.statusMsg.textContent = 'Dvere len na steny medzi izbami!';
-      }
-    } else if (editor.tool === 'ac') {
-      scene.acUnits.push({ ri: w.ri, wall: w.wall, pos: w.pos, model: 1, mode: 1, on: true });
-      dom.statusMsg.textContent = 'Klima #' + scene.acUnits.length + ' umiestnená!';
+      scene.windows.push({ wi: hit.wi, pos: hit.pos });
+      dom.statusMsg.textContent = 'Okno pridané';
       checkReady(); autoSave();
-    }
-  }
-
-  function handleWallDeleteClick(mx, my) {
-    // Check if clicking near a line (čiara) — remove it
-    for (let i = scene.lines.length - 1; i >= 0; i--) {
-      const ln = scene.lines[i];
-      const lx1 = 50 + mToP(ln.x1), ly1 = 36 + mToP(ln.y1);
-      const lx2 = 50 + mToP(ln.x2), ly2 = 36 + mToP(ln.y2);
-      const ldx = lx2 - lx1, ldy = ly2 - ly1, len2 = ldx * ldx + ldy * ldy;
-      let t = len2 > 0 ? ((mx - lx1) * ldx + (my - ly1) * ldy) / len2 : 0;
-      t = Math.max(0, Math.min(1, t));
-      const px = lx1 + t * ldx, py = ly1 + t * ldy;
-      if (Math.sqrt((mx - px) ** 2 + (my - py) ** 2) < 20) {
-        scene.lines.splice(i, 1);
-        dom.statusMsg.textContent = 'Čiara odstránená – izby spojené';
-        autoSave();
-        return;
-      }
-    }
-
-    // Then check shared walls between rooms
-    const w = wallAt(mx, my);
-    if (!w) { dom.statusMsg.textContent = 'Klikni na stenu medzi izbami'; return; }
-    if (!isSharedWall(w.ri, w.wall)) {
-      dom.statusMsg.textContent = 'Len zdieľané steny možno spojiť!';
-      return;
-    }
-    // Calculate shared wall segment in meters
-    const r = scene.rooms[w.ri];
-    let edgeVal, axis;
-    if (w.wall === 'top') { edgeVal = r.y; axis = 'h'; }
-    else if (w.wall === 'bottom') { edgeVal = r.y + r.h; axis = 'h'; }
-    else if (w.wall === 'left') { edgeVal = r.x; axis = 'v'; }
-    else { edgeVal = r.x + r.w; axis = 'v'; }
-    // Find the adjacent room
-    for (let j = 0; j < scene.rooms.length; j++) {
-      if (j === w.ri) continue;
-      const o = scene.rooms[j];
-      if (axis === 'h') {
-        if (Math.abs(o.y - edgeVal) < .02 || Math.abs(o.y + o.h - edgeVal) < .02) {
-          const s = Math.max(r.x, o.x), e = Math.min(r.x + r.w, o.x + o.w);
-          if (e > s + .05) {
-            scene.wallOpenings.push({ x1: s, y1: edgeVal, x2: e, y2: edgeVal });
-            dom.statusMsg.textContent = 'Stena odstránená – izby spojené';
-            autoSave();
-            return;
-          }
-        }
-      } else {
-        if (Math.abs(o.x - edgeVal) < .02 || Math.abs(o.x + o.w - edgeVal) < .02) {
-          const s = Math.max(r.y, o.y), e = Math.min(r.y + r.h, o.y + o.h);
-          if (e > s + .05) {
-            scene.wallOpenings.push({ x1: edgeVal, y1: s, x2: edgeVal, y2: e });
-            dom.statusMsg.textContent = 'Stena odstránená – izby spojené';
-            autoSave();
-            return;
-          }
-        }
-      }
+    } else if (editor.tool === 'door') {
+      scene.doors.push({ wi: hit.wi, pos: hit.pos });
+      dom.statusMsg.textContent = 'Dvere pridané';
+      detectRooms(); autoSave();
+    } else if (editor.tool === 'ac') {
+      scene.acUnits.push({ wi: hit.wi, pos: hit.pos, model: 1, mode: 1, on: true });
+      dom.statusMsg.textContent = 'Klima umiestnená!';
+      checkReady(); autoSave();
     }
   }
 
@@ -453,13 +355,11 @@ export function setupEditorEvents() {
     if (editor.mode !== 'editor') return;
     if (Date.now() - editor.clickGuard < 250) return;
 
-    if (editor.tool === 'line') return; // handled in pointerdown/pointerup
-    if (editor.tool === 'walldelete') { handleWallDeleteClick(mx, my); return; }
+    if (editor.tool === 'delwall') { handleDeleteWallClick(mx, my); return; }
 
-    if (editor.tool !== 'room' && tryDeleteAt(mx, my)) { checkReady(); autoSave(); return; }
+    if (!['room', 'wall', 'delwall'].includes(editor.tool) && tryDeleteAt(mx, my)) { checkReady(); autoSave(); return; }
 
-    if (editor.tool === 'room') { handleRoomClick(mx, my); return; }
-    if (!scene.rooms.length) return;
+    if (!scene.walls.length) return;
 
     if (editor.tool === 'south' || editor.tool === 'west') { handleSolarClick(mx, my); return; }
     if (editor.tool === 'temp') { handleTempClick(mx, my); return; }
@@ -480,7 +380,6 @@ export function setupEditorEvents() {
     syncZoomSlider();
   }, { passive: false });
 
-  // Prevent Safari gesture events
   cv.addEventListener('gesturestart', (e) => e.preventDefault(), { passive: false });
   cv.addEventListener('gesturechange', (e) => e.preventDefault(), { passive: false });
 
