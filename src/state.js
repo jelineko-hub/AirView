@@ -118,7 +118,11 @@ export function getAndAdvanceParticleHead() {
 }
 
 // ── Cached DOM references ──
-export const dom = {};
+export const dom = {
+  unitTemp: [],   // per-unit <span> for room temperature
+  unitInfo: [],   // per-unit <span> for power/output info
+  toolBtns: [],   // editor toolbar buttons
+};
 
 export function cacheDom() {
   dom.modeLabel = document.getElementById('modeLabel');
@@ -162,4 +166,5 @@ export function cacheDom() {
   dom.dampCouchVal = document.getElementById('dGV');
   dom.dampBed = document.getElementById('dP');
   dom.dampBedVal = document.getElementById('dPV');
+  dom.toolBtns = Array.from(dom.edToolbar.querySelectorAll('.tb'));
 }

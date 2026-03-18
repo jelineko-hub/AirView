@@ -10,7 +10,7 @@ export function checkReady() {
 export function setTool(t) {
   editor.tool = t;
   editor.clickGuard = Date.now();
-  document.querySelectorAll('#edToolbar .tb').forEach(b =>
+  dom.toolBtns.forEach(b =>
     b.classList.toggle('active', b.dataset.m === t)
   );
   const messages = {
@@ -72,6 +72,8 @@ export function syncZoomSlider() {
 /** Build unit cards for simulation toolbar */
 export function buildUnitCards() {
   dom.unitCards.innerHTML = '';
+  dom.unitTemp = [];
+  dom.unitInfo = [];
   scene.acUnits.forEach((u, i) => {
     const card = document.createElement('div');
     card.className = 'ucard' + (u.on ? '' : ' off');
@@ -89,6 +91,9 @@ export function buildUnitCards() {
       `</select>` +
       `<span class="utemp" id="ut${i}">26°C</span>` +
       `<span class="uinfo" id="ui${i}">100%</span>`;
+
+    dom.unitTemp.push(card.querySelector('.utemp'));
+    dom.unitInfo.push(card.querySelector('.uinfo'));
 
     card.querySelector('.unum').onclick = (e) => {
       e.stopPropagation();
