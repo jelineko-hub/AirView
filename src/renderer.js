@@ -218,52 +218,35 @@ function tempToRGB(t) {
 
 // ── Simulation Drawing ──
 
-export function drawSim() {
-  const ctx = canvas.ctx;
-  const cpx = sim.cellSize * PPM;
-
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.save();
-  ctx.translate(view.x, view.y);
-  ctx.scale(view.zoom, view.zoom);
-  ctx.fillStyle = '#f7f6f2';
-  ctx.fillRect(-view.x / view.zoom, -view.y / view.zoom, canvas.width / view.zoom, canvas.height / view.zoom);
-
-  // Heatmap via offscreen canvas
-  const rw = Math.round(sim.renderW), rh = Math.round(sim.renderH);
-  if (!sim.offscreen || sim.offscreen.width !== rw || sim.offscreen.height !== rh) {
+function drawHeatmap(ctx) {
+  const gw = sim.gridW, gh = sim.gridH;
+  if (!sim.offscreen || sim.offscreen.width !== gw || sim.offscreen.height !== gh) {
     sim.offscreen = document.createElement('canvas');
-    sim.offscreen.width = rw;
-    sim.offscreen.height = rh;
+    sim.offscreen.width = gw;
+    sim.offscreen.height = gh;
   }
   const oc = sim.offscreen.getContext('2d');
-  const img = oc.createImageData(rw, rh);
-  const d = img.data, iw = img.width, ih = img.height;
+  const img = oc.createImageData(gw, gh);
+  const d = img.data;
 
-  for (let gx = 0; gx < sim.gridW; gx++) {
-    for (let gy = 0; gy < sim.gridH; gy++) {
-      const idx = gy * sim.gridW + gx;
-      const isAir = sim.airMap[idx], isSolid = sim.furnitureSolid[idx];
-      let r, g, b, al;
-
-      if (!isAir) { r = g = b = 0; al = 0; }
-      else if (isSolid) { r = 90; g = 75; b = 60; al = 240; }
-      else { [r, g, b] = tempToRGB(sim.tempGrid[idx]); al = 220; }
-
-      const px0 = Math.round(gx * cpx), py0 = Math.round(gy * cpx);
-      const px1 = Math.min(Math.round((gx + 1) * cpx), iw);
-      const py1 = Math.min(Math.round((gy + 1) * cpx), ih);
-      for (let px = px0; px < px1; px++) {
-        for (let py = py0; py < py1; py++) {
-          const j = (py * iw + px) * 4;
-          d[j] = r; d[j + 1] = g; d[j + 2] = b; d[j + 3] = al;
-        }
-      }
+  for (let i = 0, len = gw * gh; i < len; i++) {
+    const j = i * 4;
+    const isAir = sim.airMap[i];
+    if (!isAir) { d[j + 3] = 0; continue; }
+    if (sim.furnitureSolid[i]) {
+      d[j] = 90; d[j + 1] = 75; d[j + 2] = 60; d[j + 3] = 240;
+    } else {
+      const rgb = tempToRGB(sim.tempGrid[i]);
+      d[j] = rgb[0]; d[j + 1] = rgb[1]; d[j + 2] = rgb[2]; d[j + 3] = 220;
     }
   }
   oc.putImageData(img, 0, 0);
-  ctx.drawImage(sim.offscreen, Math.round(sim.renderX), Math.round(sim.renderY));
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(sim.offscreen, Math.round(sim.renderX), Math.round(sim.renderY),
+    Math.round(sim.renderW), Math.round(sim.renderH));
+}
 
+function drawSceneOverlays(ctx) {
   // Room borders
   scene.rooms.forEach(r => {
     ctx.strokeStyle = '#222'; ctx.lineWidth = 2;
@@ -308,8 +291,9 @@ export function drawSim() {
     ctx.fillStyle = 'rgba(0,0,0,.15)'; ctx.font = '10px DM Sans'; ctx.textAlign = 'center';
     ctx.fillText(f.l, fx + fw / 2, fy + fh / 2 + 3);
   });
+}
 
-  // Particles
+function drawParticles(ctx) {
   for (let i = 0; i < MAX_PARTICLES; i++) {
     const p = particles[i];
     if (!p.on) continue;
@@ -318,8 +302,9 @@ export function drawSim() {
     ctx.fillStyle = 'rgba(255,255,255,' + a + ')';
     ctx.beginPath(); ctx.arc(p.x, p.y, sz, 0, Math.PI * 2); ctx.fill();
   }
+}
 
-  // AC units + cones
+function drawAcCones(ctx) {
   scene.acUnits.forEach((u, ui) => {
     if (!u.on) return;
     const m = AC_MODELS[u.model];
@@ -351,7 +336,9 @@ export function drawSim() {
 
     drawAcUnit(ctx, rx, ry, rw, rh, u.wall, u.pos, String(ui + 1));
   });
+}
 
+function drawSimHUD(ctx, cpx) {
   // Dimensions label
   const bb = allBoundingBox();
   ctx.fillStyle = '#999'; ctx.font = '12px DM Sans'; ctx.textAlign = 'center';
@@ -387,6 +374,24 @@ export function drawSim() {
       ctx.textBaseline = 'alphabetic';
     }
   }
+}
+
+export function drawSim() {
+  const ctx = canvas.ctx;
+  const cpx = sim.cellSize * PPM;
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.save();
+  ctx.translate(view.x, view.y);
+  ctx.scale(view.zoom, view.zoom);
+  ctx.fillStyle = '#f7f6f2';
+  ctx.fillRect(-view.x / view.zoom, -view.y / view.zoom, canvas.width / view.zoom, canvas.height / view.zoom);
+
+  drawHeatmap(ctx);
+  drawSceneOverlays(ctx);
+  drawParticles(ctx);
+  drawAcCones(ctx);
+  drawSimHUD(ctx, cpx);
 
   ctx.restore();
 }

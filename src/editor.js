@@ -240,7 +240,94 @@ export function setupEditorEvents() {
     if (scene.rooms.length) autoSave();
   });
 
-  // Click handler (tools)
+  // Click handler (tools) — dispatched per tool
+  function handleRoomClick(mx, my) {
+    for (let i = scene.rooms.length - 1; i >= 0; i--) {
+      const r = scene.rooms[i];
+      const rx = 50 + mToP(r.x), ry = 36 + mToP(r.y), rw = mToP(r.w), rh = mToP(r.h);
+      if (mx > rx && mx < rx + rw && my > ry && my < ry + rh) {
+        scene.windows = scene.windows.filter(w => w.ri !== i);
+        scene.doors = scene.doors.filter(d => d.ri !== i);
+        scene.acUnits = scene.acUnits.filter(u => u.ri !== i);
+        scene.windows.forEach(w => { if (w.ri > i) w.ri--; });
+        scene.doors.forEach(d => { if (d.ri > i) d.ri--; });
+        scene.acUnits.forEach(u => { if (u.ri > i) u.ri--; });
+        scene.rooms.splice(i, 1);
+        dom.statusMsg.textContent = 'Izba vymazaná';
+        checkReady(); autoSave();
+        return;
+      }
+    }
+  }
+
+  function handleSolarClick(mx, my) {
+    const bb = allBoundingBox();
+    const bx = 50 + mToP(bb.x), by = 36 + mToP(bb.y), bw = mToP(bb.w), bh = mToP(bb.h);
+    const cx2 = bx + bw / 2, cy2 = by + bh / 2, dx2 = mx - cx2, dy2 = my - cy2;
+    let side;
+    if (Math.abs(dx2) > Math.abs(dy2)) side = dx2 < 0 ? 'left' : 'right';
+    else side = dy2 < 0 ? 'top' : 'bottom';
+
+    const names = { top: 'hore', bottom: 'dole', left: 'vľavo', right: 'vpravo' };
+    if (editor.tool === 'south') {
+      if (side === scene.westSide) { dom.statusMsg.textContent = 'Táto strana je už Západ!'; return; }
+      scene.southSide = scene.southSide === side ? null : side;
+      dom.statusMsg.textContent = scene.southSide ? 'Juh ☀ = ' + names[side] : 'Juh zrušený';
+    } else {
+      if (side === scene.southSide) { dom.statusMsg.textContent = 'Táto strana je už Juh!'; return; }
+      scene.westSide = scene.westSide === side ? null : side;
+      dom.statusMsg.textContent = scene.westSide ? 'Západ ☀ = ' + names[side] : 'Západ zrušený';
+    }
+    autoSave();
+  }
+
+  function handleTempClick(mx, my) {
+    for (let i = scene.rooms.length - 1; i >= 0; i--) {
+      const r = scene.rooms[i];
+      const rx = 50 + mToP(r.x), ry = 36 + mToP(r.y), rw = mToP(r.w), rh = mToP(r.h);
+      if (mx > rx && mx < rx + rw && my > ry && my < ry + rh) {
+        const temps = [22, 24, 26, 28, 30, 32, 34];
+        const ci = temps.indexOf(r.temp || 26);
+        r.temp = temps[(ci + 1) % temps.length];
+        dom.statusMsg.textContent = 'Izba #' + (i + 1) + ': ' + r.temp + '°C';
+        autoSave();
+        return;
+      }
+    }
+  }
+
+  function handleWallToolClick(mx, my) {
+    const w = wallAt(mx, my);
+    if (!w) return;
+    if (editor.tool === 'win') {
+      scene.windows.push({ ri: w.ri, wall: w.wall, pos: w.pos });
+      dom.statusMsg.textContent = 'Okno pridané'; checkReady(); autoSave();
+    } else if (editor.tool === 'door') {
+      if (isSharedWall(w.ri, w.wall)) {
+        scene.doors.push({ ri: w.ri, wall: w.wall, pos: w.pos });
+        dom.statusMsg.textContent = 'Dvere pridané'; autoSave();
+      } else {
+        dom.statusMsg.textContent = 'Dvere len na steny medzi izbami!';
+      }
+    } else if (editor.tool === 'ac') {
+      scene.acUnits.push({ ri: w.ri, wall: w.wall, pos: w.pos, model: 1, mode: 1, on: true });
+      dom.statusMsg.textContent = 'Klima #' + scene.acUnits.length + ' umiestnená!';
+      checkReady(); autoSave();
+    }
+  }
+
+  function handleFurnitureClick(mx, my) {
+    if (!isInsideAnyRoom(mx, my)) return;
+    const fd = FURNITURE_DEFS[editor.tool];
+    scene.furniture.push({
+      x: snapGrid2(pToM(mx - 50) - fd.w / 2),
+      y: snapGrid2(pToM(my - 36) - fd.h / 2),
+      w: fd.w, h: fd.h, l: fd.label, d: fd.damping, sol: fd.solid,
+    });
+    dom.statusMsg.textContent = fd.label + ' pridaný';
+    autoSave();
+  }
+
   cv.addEventListener('click', (e) => {
     const rc = cv.getBoundingClientRect();
     const mx = ((e.clientX - rc.left) * (canvas.width / rc.width) - view.x) / view.zoom;
@@ -251,101 +338,13 @@ export function setupEditorEvents() {
 
     if (editor.tool !== 'room' && tryDeleteAt(mx, my)) { checkReady(); autoSave(); return; }
 
-    if (editor.tool === 'room') {
-      for (let i = scene.rooms.length - 1; i >= 0; i--) {
-        const r = scene.rooms[i];
-        const rx = 50 + mToP(r.x), ry = 36 + mToP(r.y), rw = mToP(r.w), rh = mToP(r.h);
-        if (mx > rx && mx < rx + rw && my > ry && my < ry + rh) {
-          scene.windows = scene.windows.filter(w => w.ri !== i);
-          scene.doors = scene.doors.filter(d => d.ri !== i);
-          scene.acUnits = scene.acUnits.filter(u => u.ri !== i);
-          scene.windows.forEach(w => { if (w.ri > i) w.ri--; });
-          scene.doors.forEach(d => { if (d.ri > i) d.ri--; });
-          scene.acUnits.forEach(u => { if (u.ri > i) u.ri--; });
-          scene.rooms.splice(i, 1);
-          dom.statusMsg.textContent = 'Izba vymazaná';
-          checkReady(); autoSave();
-          return;
-        }
-      }
-    }
+    if (editor.tool === 'room') { handleRoomClick(mx, my); return; }
+    if (!scene.rooms.length) return;
 
-    if (editor.tool === 'win' && scene.rooms.length) {
-      const w = wallAt(mx, my);
-      if (w) { scene.windows.push({ ri: w.ri, wall: w.wall, pos: w.pos }); dom.statusMsg.textContent = 'Okno pridané'; checkReady(); autoSave(); }
-      return;
-    }
-
-    if ((editor.tool === 'south' || editor.tool === 'west') && scene.rooms.length) {
-      const bb = allBoundingBox();
-      const bx = 50 + mToP(bb.x), by = 36 + mToP(bb.y), bw = mToP(bb.w), bh = mToP(bb.h);
-      const cx2 = bx + bw / 2, cy2 = by + bh / 2, dx2 = mx - cx2, dy2 = my - cy2;
-      let side;
-      if (Math.abs(dx2) > Math.abs(dy2)) side = dx2 < 0 ? 'left' : 'right';
-      else side = dy2 < 0 ? 'top' : 'bottom';
-
-      const names = { top: 'hore', bottom: 'dole', left: 'vľavo', right: 'vpravo' };
-      if (editor.tool === 'south') {
-        if (side === scene.westSide) { dom.statusMsg.textContent = 'Táto strana je už Západ!'; return; }
-        scene.southSide = scene.southSide === side ? null : side;
-        dom.statusMsg.textContent = scene.southSide ? 'Juh ☀ = ' + names[side] : 'Juh zrušený';
-        autoSave();
-      } else {
-        if (side === scene.southSide) { dom.statusMsg.textContent = 'Táto strana je už Juh!'; return; }
-        scene.westSide = scene.westSide === side ? null : side;
-        dom.statusMsg.textContent = scene.westSide ? 'Západ ☀ = ' + names[side] : 'Západ zrušený';
-        autoSave();
-      }
-      return;
-    }
-
-    if (editor.tool === 'temp' && scene.rooms.length) {
-      for (let i = scene.rooms.length - 1; i >= 0; i--) {
-        const r = scene.rooms[i];
-        const rx = 50 + mToP(r.x), ry = 36 + mToP(r.y), rw = mToP(r.w), rh = mToP(r.h);
-        if (mx > rx && mx < rx + rw && my > ry && my < ry + rh) {
-          const temps = [22, 24, 26, 28, 30, 32, 34];
-          const ci = temps.indexOf(r.temp || 26);
-          r.temp = temps[(ci + 1) % temps.length];
-          dom.statusMsg.textContent = 'Izba #' + (i + 1) + ': ' + r.temp + '°C';
-          autoSave();
-          return;
-        }
-      }
-      return;
-    }
-
-    if (editor.tool === 'door' && scene.rooms.length) {
-      const w = wallAt(mx, my);
-      if (w && isSharedWall(w.ri, w.wall)) {
-        scene.doors.push({ ri: w.ri, wall: w.wall, pos: w.pos });
-        dom.statusMsg.textContent = 'Dvere pridané'; autoSave();
-      } else if (w) {
-        dom.statusMsg.textContent = 'Dvere len na steny medzi izbami!';
-      }
-      return;
-    }
-
-    if (editor.tool === 'ac' && scene.rooms.length) {
-      const w = wallAt(mx, my);
-      if (w) {
-        scene.acUnits.push({ ri: w.ri, wall: w.wall, pos: w.pos, model: 1, mode: 1, on: true });
-        dom.statusMsg.textContent = 'Klima #' + scene.acUnits.length + ' umiestnená!';
-        checkReady(); autoSave();
-      }
-      return;
-    }
-
-    if (['couch', 'bed', 'ward', 'table'].includes(editor.tool) && scene.rooms.length && isInsideAnyRoom(mx, my)) {
-      const fd = FURNITURE_DEFS[editor.tool];
-      scene.furniture.push({
-        x: snapGrid2(pToM(mx - 50) - fd.w / 2),
-        y: snapGrid2(pToM(my - 36) - fd.h / 2),
-        w: fd.w, h: fd.h, l: fd.label, d: fd.damping, sol: fd.solid,
-      });
-      dom.statusMsg.textContent = fd.label + ' pridaný';
-      autoSave();
-    }
+    if (editor.tool === 'south' || editor.tool === 'west') { handleSolarClick(mx, my); return; }
+    if (editor.tool === 'temp') { handleTempClick(mx, my); return; }
+    if (editor.tool === 'win' || editor.tool === 'door' || editor.tool === 'ac') { handleWallToolClick(mx, my); return; }
+    if (['couch', 'bed', 'ward', 'table'].includes(editor.tool)) { handleFurnitureClick(mx, my); }
   });
 
   // Wheel zoom
