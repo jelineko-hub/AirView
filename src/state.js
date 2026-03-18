@@ -90,6 +90,8 @@ export const sim = {
   furnitureEdge: null,  // Float32Array — furniture edge proximity
   wallH: null,          // Uint8Array — horizontal wall between cells
   wallV: null,          // Uint8Array — vertical wall between cells
+  cellRoomMap: null,    // Int16Array — room index per cell (-1 if none)
+  roomCellCount: [],    // per-room air cell count (excl. solid furniture)
   unitPower: [],        // per-unit power output (0..1+)
   unitRoomTemp: [],     // per-unit smoothed room temperature
   unitOutTemp: [],      // per-unit output temperature

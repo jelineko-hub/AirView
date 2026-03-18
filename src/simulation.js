@@ -87,11 +87,20 @@ function buildSimMaps() {
   sim.externalTemp = new Float32Array(gridW * gridH);
   sim.externalCoeff = new Float32Array(gridW * gridH);
 
+  sim.cellRoomMap = new Int16Array(gridW * gridH);
+  const roomCellCount = [];
+  for (let i = 0; i < scene.rooms.length; i++) roomCellCount.push(0);
+
   for (let x = 0; x < gridW; x++) {
     for (let y = 0; y < gridH; y++) {
-      sim.airMap[y * gridW + x] = cellRoom(x, y) >= 0 ? 1 : 0;
+      const ri = cellRoom(x, y);
+      const idx = y * gridW + x;
+      sim.cellRoomMap[idx] = ri;
+      sim.airMap[idx] = ri >= 0 ? 1 : 0;
+      if (ri >= 0) roomCellCount[ri]++;
     }
   }
+  sim.roomCellCount = roomCellCount;
 
   buildWallMaps();
 
@@ -119,6 +128,13 @@ function buildSimMaps() {
       }
     }
   });
+
+  // Recount room cells excluding solid furniture
+  for (let i = 0; i < scene.rooms.length; i++) sim.roomCellCount[i] = 0;
+  for (let i = 0, len = gridW * gridH; i < len; i++) {
+    const ri = sim.cellRoomMap[i];
+    if (ri >= 0 && !sim.furnitureSolid[i]) sim.roomCellCount[ri]++;
+  }
 
   // External heat sources
   function getInsulation() {
@@ -269,22 +285,18 @@ function getUnitBaseAngle(u) {
 }
 
 function getRoomAvgTemp(u) {
-  const ar = scene.rooms[u.ri];
-  if (!ar) return 25;
-  const { gridW, gridH } = sim;
-  let s = 0, c = 0;
-  for (let x = 0; x < gridW; x++) {
-    for (let y = 0; y < gridH; y++) {
-      const i = y * gridW + x;
-      if (!sim.airMap[i] || sim.furnitureSolid[i]) continue;
-      const px = sim.bboxX + (x + .5) * sim.cellSize;
-      const py = sim.bboxY + (y + .5) * sim.cellSize;
-      if (px >= ar.x && px <= ar.x + ar.w && py >= ar.y && py <= ar.y + ar.h) {
-        s += sim.tempGrid[i]; c++;
-      }
+  const ri = u.ri;
+  if (ri < 0 || ri >= scene.rooms.length) return 25;
+  const cnt = sim.roomCellCount[ri];
+  if (!cnt) return 25;
+  const { gridW, gridH, cellRoomMap, furnitureSolid, tempGrid } = sim;
+  let s = 0;
+  for (let i = 0, len = gridW * gridH; i < len; i++) {
+    if (cellRoomMap[i] === ri && !furnitureSolid[i]) {
+      s += tempGrid[i];
     }
   }
-  return c ? s / c : 25;
+  return s / cnt;
 }
 
 function calcUnitOutput(u, ui) {
@@ -408,10 +420,62 @@ function wallBetween(ox, oy, nx, ny) {
 
 // ── Update particles ──
 
+function collideParticleFurniture(p) {
+  for (const f of scene.furniture) {
+    const fx = OX + mToP(f.x), fy = OY + mToP(f.y), fw = mToP(f.w), fh = mToP(f.h);
+    if (p.x > fx && p.x < fx + fw && p.y > fy && p.y < fy + fh) {
+      if (f.sol) {
+        const dl = p.x - fx, dr = fx + fw - p.x, dt = p.y - fy, db = fy + fh - p.y;
+        const mn = Math.min(dl, dr, dt, db);
+        if (mn === dl || mn === dr) p.vx *= -.35; else p.vy *= -.35;
+      } else { p.vx *= .993; p.vy *= .993; }
+    }
+  }
+}
+
+function collideParticleWalls(p, ox, oy) {
+  if (!isParticleCellOk(p.x, p.y)) {
+    p.x = ox; p.y = oy;
+    p.vx *= -.6; p.vy *= -.6;
+    p.vx += (Math.random() - .5) * .3; p.vy += (Math.random() - .5) * .3;
+    return;
+  }
+  const wt = wallBetween(ox, oy, p.x, p.y);
+  if (wt > 0) {
+    if (isParticleInDoor(p.x, p.y)) {
+      if (Math.random() < .22) {
+        p.x = ox; p.y = oy;
+        if (wt === 1) p.vx *= -.4; else p.vy *= -.4;
+        p.vx += (Math.random() - .5) * .2; p.vy += (Math.random() - .5) * .2;
+      }
+    } else {
+      p.x = ox; p.y = oy;
+      if (wt === 1) { p.vx *= -.6; p.vx += (Math.random() - .5) * .2; }
+      else { p.vy *= -.6; p.vy += (Math.random() - .5) * .2; }
+    }
+  }
+}
+
+function applyParticleHeat(p, cpx, oT, cp, es) {
+  const { gridW } = sim;
+  const gx = Math.floor((p.x - sim.renderX) / cpx);
+  const gy = Math.floor((p.y - sim.renderY) / cpx);
+  if (gx >= 0 && gx < sim.gridW && gy >= 0 && gy < sim.gridH &&
+      sim.airMap[gy * gridW + gx] && !sim.furnitureSolid[gy * gridW + gx]) {
+    const ii = gy * gridW + gx;
+    const ct = sim.tempGrid[ii];
+    if (ct > oT) {
+      const youth = 1 - p.age / p.maxAge;
+      const str = cp * youth * youth;
+      const eb = sim.furnitureEdge[ii];
+      sim.tempGrid[ii] = ct - (ct - oT) * str * (1 + eb * es);
+    }
+  }
+}
+
 export function updateParticles() {
   const cpx = sim.cellSize * PPM;
   const es = getEdgeSoftness();
-  const { gridW } = sim;
 
   for (let i = 0; i < MAX_PARTICLES; i++) {
     const p = particles[i];
@@ -433,63 +497,13 @@ export function updateParticles() {
     const dx = ax - p.x, dy = ay - p.y, d = Math.sqrt(dx * dx + dy * dy);
     if (d > 60 && p.age > 25) { p.vx += dx / d * .008; p.vy += dy / d * .006; }
 
-    // Furniture collision
-    for (const f of scene.furniture) {
-      const fx = OX + mToP(f.x), fy = OY + mToP(f.y), fw = mToP(f.w), fh = mToP(f.h);
-      if (p.x > fx && p.x < fx + fw && p.y > fy && p.y < fy + fh) {
-        if (f.sol) {
-          const dl = p.x - fx, dr = fx + fw - p.x, dt = p.y - fy, db = fy + fh - p.y;
-          const mn = Math.min(dl, dr, dt, db);
-          if (mn === dl || mn === dr) p.vx *= -.35; else p.vy *= -.35;
-        } else { p.vx *= .993; p.vy *= .993; }
-      }
-    }
-
-    // Boundary collision
-    let bounced = false;
-    if (!isParticleCellOk(p.x, p.y)) {
-      p.x = ox; p.y = oy;
-      p.vx *= -.6; p.vy *= -.6;
-      p.vx += (Math.random() - .5) * .3; p.vy += (Math.random() - .5) * .3;
-      bounced = true;
-    }
-
-    // Wall collision
-    if (!bounced) {
-      const wt = wallBetween(ox, oy, p.x, p.y);
-      if (wt > 0) {
-        if (isParticleInDoor(p.x, p.y)) {
-          if (Math.random() < .22) {
-            p.x = ox; p.y = oy;
-            if (wt === 1) p.vx *= -.4; else p.vy *= -.4;
-            p.vx += (Math.random() - .5) * .2; p.vy += (Math.random() - .5) * .2;
-          }
-        } else {
-          p.x = ox; p.y = oy;
-          if (wt === 1) { p.vx *= -.6; p.vx += (Math.random() - .5) * .2; }
-          else { p.vy *= -.6; p.vy += (Math.random() - .5) * .2; }
-          bounced = true;
-        }
-      }
-    }
+    collideParticleFurniture(p);
+    collideParticleWalls(p, ox, oy);
 
     p.age++;
     if (p.age > p.maxAge) { p.on = false; continue; }
 
-    // Heat exchange
-    const gx = Math.floor((p.x - sim.renderX) / cpx);
-    const gy = Math.floor((p.y - sim.renderY) / cpx);
-    if (gx >= 0 && gx < sim.gridW && gy >= 0 && gy < sim.gridH &&
-        sim.airMap[gy * gridW + gx] && !sim.furnitureSolid[gy * gridW + gx]) {
-      const ii = gy * gridW + gx;
-      const ct = sim.tempGrid[ii];
-      if (ct > oT) {
-        const youth = 1 - p.age / p.maxAge;
-        const str = cp * youth * youth;
-        const eb = sim.furnitureEdge[ii];
-        sim.tempGrid[ii] = ct - (ct - oT) * str * (1 + eb * es);
-      }
-    }
+    applyParticleHeat(p, cpx, oT, cp, es);
   }
 }
 
@@ -507,25 +521,31 @@ export function updateGrid() {
   const df = (.03 + progress * .04) * dfM;
   const passes = Math.max(1, Math.round((2 + Math.floor(progress * 2)) * dfM));
 
+  // Neighbor offsets: [dx, dy, weight] — precomputed outside loop
+  const NB_DX = [-1, 1, 0, 0, -1, 1, -1, 1];
+  const NB_DY = [0, 0, -1, 1, -1, -1, 1, 1];
+  const NB_W  = [1, 1, 1, 1, .7, .7, .7, .7];
+
   for (let pass = 0; pass < passes; pass++) {
     sim.tempBuffer.set(sim.tempGrid);
     for (let x = 0; x < gridW; x++) {
       for (let y = 0; y < gridH; y++) {
-        if (!sim.airMap[y * gridW + x] || sim.furnitureSolid[y * gridW + x]) continue;
         const i = y * gridW + x;
+        if (!sim.airMap[i] || sim.furnitureSolid[i]) continue;
         let s = 0, c = 0;
-        const neighbors = [[x - 1, y, 1], [x + 1, y, 1], [x, y - 1, 1], [x, y + 1, 1],
-                           [x - 1, y - 1, .7], [x + 1, y - 1, .7], [x - 1, y + 1, .7], [x + 1, y + 1, .7]];
 
-        for (const [nx, ny, w] of neighbors) {
-          if (nx < 0 || nx >= gridW || ny < 0 || ny >= gridH || !sim.airMap[ny * gridW + nx] || sim.furnitureSolid[ny * gridW + nx]) continue;
-          const dx = Math.abs(nx - x), dy = Math.abs(ny - y);
-          if (dx === 1 && dy === 0 && sim.wallH[y * gridW + Math.max(x, nx)]) continue;
-          if (dx === 0 && dy === 1 && sim.wallV[Math.max(y, ny) * gridW + x]) continue;
-          if (dx === 1 && dy === 1) {
+        for (let n = 0; n < 8; n++) {
+          const nx = x + NB_DX[n], ny = y + NB_DY[n];
+          if (nx < 0 || nx >= gridW || ny < 0 || ny >= gridH) continue;
+          const ni = ny * gridW + nx;
+          if (!sim.airMap[ni] || sim.furnitureSolid[ni]) continue;
+          const adx = Math.abs(NB_DX[n]), ady = Math.abs(NB_DY[n]);
+          if (adx === 1 && ady === 0 && sim.wallH[y * gridW + Math.max(x, nx)]) continue;
+          if (adx === 0 && ady === 1 && sim.wallV[Math.max(y, ny) * gridW + x]) continue;
+          if (adx === 1 && ady === 1) {
             if (sim.wallH[y * gridW + Math.max(x, nx)] || sim.wallV[Math.max(y, ny) * gridW + x]) continue;
           }
-          s += sim.tempBuffer[ny * gridW + nx] * w; c += w;
+          s += sim.tempBuffer[ni] * NB_W[n]; c += NB_W[n];
         }
 
         if (c > 0) {
