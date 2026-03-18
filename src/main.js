@@ -33,7 +33,7 @@ function initUI() {
   cacheDom();
 
   // Toolbar buttons
-  document.querySelectorAll('#edToolbar .tb').forEach(b => {
+  dom.toolBtns.forEach(b => {
     b.onclick = () => setTool(b.dataset.m);
   });
 

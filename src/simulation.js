@@ -352,9 +352,9 @@ export function emitParticles() {
     }
 
     const maxMult = u.mode === 2 ? 1.35 : u.mode === 0 ? .6 : 1;
-    const te = document.getElementById('ut' + ui);
+    const te = dom.unitTemp[ui];
     if (te) te.textContent = getRoomAvgTemp(u).toFixed(1) + '°C';
-    const ie = document.getElementById('ui' + ui);
+    const ie = dom.unitInfo[ui];
     if (ie) ie.textContent = Math.round(sim.unitPower[ui] / maxMult * 100) + '%  ' + sim.unitOutTemp[ui].toFixed(0) + '°C';
   });
 }
