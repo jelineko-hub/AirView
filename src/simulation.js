@@ -38,34 +38,37 @@ function buildWallMaps() {
   sim.wallH = new Uint8Array(gridW * gridH);
   sim.wallV = new Uint8Array(gridW * gridH);
 
-  // For each wall segment, mark grid edges
+  // wallH[y*gridW+x] = 1 means vertical barrier between cell (x-1,y) and (x,y)
+  // wallV[y*gridW+x] = 1 means horizontal barrier between cell (x,y-1) and (x,y)
+  // A wall segment maps to the grid edge closest to its position
   scene.walls.forEach(w => {
     const isH = wallDir(w) === 'h';
     if (isH) {
+      // Horizontal wall → creates horizontal barriers (wallV entries)
       const wy = w.y1;
       const minX = Math.min(w.x1, w.x2), maxX = Math.max(w.x1, w.x2);
+      // Find the grid row boundary closest to wy
       const gy = Math.round((wy - bboxY) / cellSize);
-      if (gy < 0 || gy >= gridH) return;
+      if (gy < 1 || gy >= gridH) return;
       const gx1 = Math.max(0, Math.floor((minX - bboxX) / cellSize));
-      const gx2 = Math.min(gridW - 1, Math.ceil((maxX - bboxX) / cellSize));
+      const gx2 = Math.min(gridW - 1, Math.ceil((maxX - bboxX) / cellSize) - 1);
       for (let x = gx1; x <= gx2; x++) {
         const px = bboxX + (x + .5) * cellSize;
-        const py = wy;
-        if (!cellInDoor(px, py)) {
+        if (!cellInDoor(px, wy)) {
           sim.wallV[gy * gridW + x] = 1;
         }
       }
     } else {
+      // Vertical wall → creates vertical barriers (wallH entries)
       const wx = w.x1;
       const minY = Math.min(w.y1, w.y2), maxY = Math.max(w.y1, w.y2);
       const gx = Math.round((wx - bboxX) / cellSize);
-      if (gx < 0 || gx >= gridW) return;
+      if (gx < 1 || gx >= gridW) return;
       const gy1 = Math.max(0, Math.floor((minY - bboxY) / cellSize));
-      const gy2 = Math.min(gridH - 1, Math.ceil((maxY - bboxY) / cellSize));
+      const gy2 = Math.min(gridH - 1, Math.ceil((maxY - bboxY) / cellSize) - 1);
       for (let y = gy1; y <= gy2; y++) {
-        const px = wx;
         const py = bboxY + (y + .5) * cellSize;
-        if (!cellInDoor(px, py)) {
+        if (!cellInDoor(wx, py)) {
           sim.wallH[y * gridW + gx] = 1;
         }
       }
@@ -78,10 +81,12 @@ function buildWallMaps() {
 function buildSimMaps() {
   const bb = allBoundingBox();
   if (!bb) return;
-  sim.bboxX = bb.x;
-  sim.bboxY = bb.y;
-  sim.gridW = Math.ceil(bb.w / sim.cellSize);
-  sim.gridH = Math.ceil(bb.h / sim.cellSize);
+  // Add small padding so boundary walls fall inside the grid
+  const pad = sim.cellSize;
+  sim.bboxX = bb.x - pad;
+  sim.bboxY = bb.y - pad;
+  sim.gridW = Math.ceil((bb.w + 2 * pad) / sim.cellSize) + 1;
+  sim.gridH = Math.ceil((bb.h + 2 * pad) / sim.cellSize) + 1;
 
   const { gridW, gridH, cellSize, bboxX, bboxY } = sim;
 
@@ -93,22 +98,85 @@ function buildSimMaps() {
   sim.cellRoomMap = new Int16Array(gridW * gridH);
   sim.cellRoomMap.fill(-1);
 
+  // Build wall barriers first
+  buildWallMaps();
+
+  // Build airMap via flood fill (independent of detectRooms)
+  // 1. Mark wall cells on grid
+  const wallCell = new Uint8Array(gridW * gridH);
+  scene.walls.forEach(w => {
+    const isH = wallDir(w) === 'h';
+    if (isH) {
+      const gy = Math.round((w.y1 - bboxY) / cellSize);
+      const gx1 = Math.floor((Math.min(w.x1, w.x2) - bboxX) / cellSize);
+      const gx2 = Math.ceil((Math.max(w.x1, w.x2) - bboxX) / cellSize);
+      for (let x = Math.max(0, gx1); x <= Math.min(gridW - 1, gx2); x++) {
+        if (gy >= 0 && gy < gridH) wallCell[gy * gridW + x] = 1;
+      }
+    } else {
+      const gx = Math.round((w.x1 - bboxX) / cellSize);
+      const gy1 = Math.floor((Math.min(w.y1, w.y2) - bboxY) / cellSize);
+      const gy2 = Math.ceil((Math.max(w.y1, w.y2) - bboxY) / cellSize);
+      for (let y = Math.max(0, gy1); y <= Math.min(gridH - 1, gy2); y++) {
+        if (gx >= 0 && gx < gridW) wallCell[y * gridW + gx] = 1;
+      }
+    }
+  });
+
+  // 2. Flood fill from borders to mark outside cells
+  const outside = new Uint8Array(gridW * gridH);
+  const queue = [];
+  for (let x = 0; x < gridW; x++) {
+    if (!wallCell[x]) { outside[x] = 1; queue.push(x); }
+    const bi = (gridH - 1) * gridW + x;
+    if (!wallCell[bi]) { outside[bi] = 1; queue.push(bi); }
+  }
+  for (let y = 1; y < gridH - 1; y++) {
+    if (!wallCell[y * gridW]) { outside[y * gridW] = 1; queue.push(y * gridW); }
+    const ri = y * gridW + gridW - 1;
+    if (!wallCell[ri]) { outside[ri] = 1; queue.push(ri); }
+  }
+  let qi = 0;
+  while (qi < queue.length) {
+    const idx = queue[qi++];
+    const x = idx % gridW, y = (idx - x) / gridW;
+    const nb = [y > 0 ? idx - gridW : -1, y < gridH - 1 ? idx + gridW : -1,
+                x > 0 ? idx - 1 : -1, x < gridW - 1 ? idx + 1 : -1];
+    for (let i = 0; i < 4; i++) {
+      const ni = nb[i];
+      if (ni >= 0 && !wallCell[ni] && !outside[ni]) { outside[ni] = 1; queue.push(ni); }
+    }
+  }
+
+  // 3. Everything not outside and not wall = air
+  for (let i = 0; i < gridW * gridH; i++) {
+    sim.airMap[i] = (!wallCell[i] && !outside[i]) ? 1 : 0;
+  }
+
+  // 4. Map air cells to detected rooms (for temperature)
   const roomCellCount = [];
   for (let i = 0; i < scene.rooms.length; i++) roomCellCount.push(0);
 
-  // Map detected room cells to simulation grid
-  scene.rooms.forEach((r, ri) => {
-    r.cells.forEach(c => {
-      const gx = Math.floor((c.x - bboxX) / cellSize);
-      const gy = Math.floor((c.y - bboxY) / cellSize);
-      if (gx >= 0 && gx < gridW && gy >= 0 && gy < gridH) {
-        const idx = gy * gridW + gx;
-        sim.airMap[idx] = 1;
-        sim.cellRoomMap[idx] = ri;
-        roomCellCount[ri]++;
+  for (let x = 0; x < gridW; x++) {
+    for (let y = 0; y < gridH; y++) {
+      const idx = y * gridW + x;
+      if (!sim.airMap[idx]) continue;
+      const px = bboxX + (x + .5) * cellSize;
+      const py = bboxY + (y + .5) * cellSize;
+      // Find which detected room this cell belongs to
+      for (let ri = 0; ri < scene.rooms.length; ri++) {
+        const r = scene.rooms[ri];
+        if (Math.abs(px - r.cx) < r.area && Math.abs(py - r.cy) < r.area) {
+          // Check if point is inside this room's cells
+          if (r.cells.some(c => px >= c.x && px < c.x + 0.1 && py >= c.y && py < c.y + 0.1)) {
+            sim.cellRoomMap[idx] = ri;
+            roomCellCount[ri]++;
+            break;
+          }
+        }
       }
-    });
-  });
+    }
+  }
   sim.roomCellCount = roomCellCount;
 
   buildWallMaps();
@@ -278,11 +346,10 @@ export function initSim() {
     }
   }
 
-  const bb = allBoundingBox();
-  sim.renderX = OX + mToP(bb.x);
-  sim.renderY = OY + mToP(bb.y);
-  sim.renderW = mToP(bb.w);
-  sim.renderH = mToP(bb.h);
+  sim.renderX = OX + mToP(sim.bboxX);
+  sim.renderY = OY + mToP(sim.bboxY);
+  sim.renderW = mToP(sim.gridW * sim.cellSize);
+  sim.renderH = mToP(sim.gridH * sim.cellSize);
 
   sim.unitPower = scene.acUnits.map(() => 1);
   sim.unitRoomTemp = scene.acUnits.map(() => 26);

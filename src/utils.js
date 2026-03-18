@@ -66,36 +66,8 @@ export function detectRooms() {
     }
   });
 
-  // Remove wall cells at door locations
-  scene.doors.forEach(d => {
-    const w = scene.walls[d.wi];
-    if (!w) return;
-    const isH = Math.abs(w.y1 - w.y2) < 0.001;
-    const hw = 0.45; // half door width
-    let dx, dy;
-    if (isH) {
-      dx = Math.min(w.x1, w.x2) + d.pos * Math.abs(w.x2 - w.x1);
-      dy = w.y1;
-    } else {
-      dx = w.x1;
-      dy = Math.min(w.y1, w.y2) + d.pos * Math.abs(w.y2 - w.y1);
-    }
-    const gx = Math.round((dx - ox) / cs);
-    const gy = Math.round((dy - oy) / cs);
-    // Clear wall cells in door area
-    for (let ddx = -4; ddx <= 4; ddx++) {
-      for (let ddy = -4; ddy <= 4; ddy++) {
-        const cx = gx + ddx, cy = gy + ddy;
-        if (cx < 0 || cx >= gw || cy < 0 || cy >= gh) continue;
-        const px = ox + cx * cs, py = oy + cy * cs;
-        if (isH && Math.abs(py - dy) < cs * 1.5 && Math.abs(px - dx) < hw) {
-          grid[cy * gw + cx] = 0;
-        } else if (!isH && Math.abs(px - dx) < cs * 1.5 && Math.abs(py - dy) < hw) {
-          grid[cy * gw + cx] = 0;
-        }
-      }
-    }
-  });
+  // Note: doors do NOT open walls for room detection — rooms stay separate.
+  // Doors only open walls in simulation (buildWallMaps) for air flow.
 
   // Flood fill from outside (BFS from border cells)
   const queue = [];

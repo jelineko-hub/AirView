@@ -45,20 +45,19 @@ function drawGrid() {
 
 export function drawAcUnit(ctx, wall, pos, label) {
   if (!wall) return;
-  const p = getObjectPixels('ac', { wi: -1, pos }); // we'll compute manually
   const wx1 = OX + mToP(wall.x1), wy1 = OY + mToP(wall.y1);
   const wx2 = OX + mToP(wall.x2), wy2 = OY + mToP(wall.y2);
   const ax = wx1 + pos * (wx2 - wx1), ay = wy1 + pos * (wy2 - wy1);
   const isH = Math.abs(wall.y1 - wall.y2) < 0.001;
-  const uw = 56, uh = 8;
+  const uw = 64, uh = 12;
 
   let bx, by, bw, bh;
   if (isH) { bx = ax - uw / 2; by = ay - uh / 2; bw = uw; bh = uh; }
   else { bx = ax - uh / 2; by = ay - uw / 2; bw = uh; bh = uw; }
 
-  ctx.fillStyle = '#fff'; ctx.strokeStyle = '#999'; ctx.lineWidth = 1.2;
-  ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 2); ctx.fill(); ctx.stroke();
-  ctx.fillStyle = '#555'; ctx.font = 'bold 8px DM Sans'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#fff'; ctx.strokeStyle = '#888'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, isH ? uh / 2 : bw / 2); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#555'; ctx.font = 'bold 9px DM Sans'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
 
   if (!isH) {
     ctx.save(); ctx.translate(bx + bw / 2, by + bh / 2); ctx.rotate(-Math.PI / 2);
@@ -142,15 +141,37 @@ export function drawEditor() {
     }
   }
 
-  // Detected room fills
+  // Detected room fills — use offscreen canvas for smooth rendering
   const cs = DETECT_CELL;
-  const roomColors = ['rgba(220,235,225,.5)', 'rgba(225,230,240,.5)', 'rgba(240,230,215,.5)', 'rgba(230,220,235,.5)'];
-  scene.rooms.forEach((r, ri) => {
-    ctx.fillStyle = roomColors[ri % roomColors.length];
-    r.cells.forEach(c => {
-      ctx.fillRect(OX + mToP(c.x), OY + mToP(c.y), mToP(cs), mToP(cs));
-    });
-  });
+  const roomColors = ['rgba(200,225,210,.35)', 'rgba(210,220,235,.35)', 'rgba(235,220,200,.35)', 'rgba(220,210,230,.35)'];
+  if (scene.rooms.length) {
+    const bb = allBoundingBox();
+    if (bb) {
+      const fillPx = mToP(cs);
+      scene.rooms.forEach((r, ri) => {
+        ctx.fillStyle = roomColors[ri % roomColors.length];
+        // Batch fill: group cells into horizontal runs for faster rendering
+        const cellsByRow = {};
+        r.cells.forEach(c => {
+          const key = c.y.toFixed(2);
+          if (!cellsByRow[key]) cellsByRow[key] = [];
+          cellsByRow[key].push(c.x);
+        });
+        Object.entries(cellsByRow).forEach(([yStr, xs]) => {
+          xs.sort((a, b) => a - b);
+          let start = xs[0], end = xs[0];
+          for (let i = 1; i <= xs.length; i++) {
+            if (i < xs.length && Math.abs(xs[i] - end - cs) < 0.01) {
+              end = xs[i];
+            } else {
+              ctx.fillRect(OX + mToP(start), OY + mToP(+yStr), mToP(end - start + cs), fillPx);
+              if (i < xs.length) { start = xs[i]; end = xs[i]; }
+            }
+          }
+        });
+      });
+    }
+  }
 
   // Walls
   ctx.strokeStyle = '#222'; ctx.lineWidth = 2.5;
@@ -381,12 +402,15 @@ function drawAcCones(ctx) {
 function drawSimHUD(ctx, cpx) {
   const bb = allBoundingBox();
   if (!bb) return;
+  // Use bb (actual walls) for HUD positioning, not padded sim render area
+  const hudX = OX + mToP(bb.x), hudY = OY + mToP(bb.y);
+  const hudW = mToP(bb.w), hudH = mToP(bb.h);
   ctx.fillStyle = '#999'; ctx.font = '12px DM Sans'; ctx.textAlign = 'center';
-  ctx.fillText(bb.w.toFixed(1) + ' × ' + bb.h.toFixed(1) + ' m', sim.renderX + sim.renderW / 2, sim.renderY - 8);
+  ctx.fillText(bb.w.toFixed(1) + ' × ' + bb.h.toFixed(1) + ' m', hudX + hudW / 2, hudY - 8);
 
   const totalSeconds = (+dom.simLength.value) * 60;
-  ctx.fillStyle = 'rgba(0,0,0,.07)'; ctx.fillRect(sim.renderX, sim.renderY + sim.renderH + 6, sim.renderW, 5);
-  ctx.fillStyle = '#1D9E75'; ctx.fillRect(sim.renderX, sim.renderY + sim.renderH + 6, sim.renderW * Math.min(sim.elapsed / totalSeconds, 1), 5);
+  ctx.fillStyle = 'rgba(0,0,0,.07)'; ctx.fillRect(hudX, hudY + hudH + 6, hudW, 5);
+  ctx.fillStyle = '#1D9E75'; ctx.fillRect(hudX, hudY + hudH + 6, hudW * Math.min(sim.elapsed / totalSeconds, 1), 5);
 
   if (editor.cursorX > sim.renderX && editor.cursorX < sim.renderX + sim.renderW &&
       editor.cursorY > sim.renderY && editor.cursorY < sim.renderY + sim.renderH) {
