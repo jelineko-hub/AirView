@@ -6,10 +6,7 @@ export const OY = 36;         // canvas origin Y offset
 export const MAX_PARTICLES = 3000;
 
 export const FURNITURE_DEFS = {
-  couch: { w: 1.6, h: 0.6, label: 'Gauč',    damping: 0.99,  solid: false },
-  bed:   { w: 1.4, h: 1.9, label: 'Posteľ',  damping: 0.995, solid: false },
   ward:  { w: 0.6, h: 1.6, label: 'Skriňa',  damping: 1,     solid: true  },
-  table: { w: 0.8, h: 0.5, label: 'Stôl',    damping: 0.995, solid: false },
 };
 
 export const AC_MODELS = [
@@ -33,6 +30,8 @@ export const scene = {
   furniture: [],
   acUnits: [],
   doors: [],
+  lines: [],
+  wallOpenings: [],
   southSide: null,
   westSide: null,
 };
@@ -73,7 +72,8 @@ export const editor = {
   cursorX: -1,
   cursorY: -1,
   clickGuard: 0,
-  wallDrag: null,
+  lineStart: null,
+  lineDrag: false,
 };
 
 // ── Simulation state ──
@@ -90,6 +90,8 @@ export const sim = {
   furnitureEdge: null,  // Float32Array — furniture edge proximity
   wallH: null,          // Uint8Array — horizontal wall between cells
   wallV: null,          // Uint8Array — vertical wall between cells
+  cellRoomMap: null,    // Int16Array — room index per cell (-1 if none)
+  roomCellCount: [],    // per-room air cell count (excl. solid furniture)
   unitPower: [],        // per-unit power output (0..1+)
   unitRoomTemp: [],     // per-unit smoothed room temperature
   unitOutTemp: [],      // per-unit output temperature
@@ -162,9 +164,5 @@ export function cacheDom() {
   dom.diffusionVal = document.getElementById('dFV');
   dom.sunGain = document.getElementById('sG');
   dom.sunGainVal = document.getElementById('sGV');
-  dom.dampCouch = document.getElementById('dG');
-  dom.dampCouchVal = document.getElementById('dGV');
-  dom.dampBed = document.getElementById('dP');
-  dom.dampBedVal = document.getElementById('dPV');
   dom.toolBtns = Array.from(dom.edToolbar.querySelectorAll('.tb'));
 }

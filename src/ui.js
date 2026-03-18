@@ -1,4 +1,5 @@
 import { scene, dom, editor, sim, view } from './state.js';
+
 import { initSim } from './simulation.js';
 
 /** Check if simulation button should be visible */
@@ -8,6 +9,7 @@ export function checkReady() {
 
 /** Set active editor tool */
 export function setTool(t) {
+  editor.lineStart = null;
   editor.tool = t;
   editor.clickGuard = Date.now();
   dom.toolBtns.forEach(b =>
@@ -15,15 +17,14 @@ export function setTool(t) {
   );
   const messages = {
     room: 'Ťahaj = nová izba, klik = vymaž izbu',
+    line: 'Klikni na začiatok čiary',
+    walldelete: 'Klikni na zdieľanú stenu pre spojenie izieb',
     win: 'Klikni na stenu pre okno',
     south: 'Klikni kdekoľvek – najbližšia strana = JUH',
     west: 'Klikni kdekoľvek – najbližšia strana = ZÁPAD',
     door: 'Klikni na zdieľanú stenu pre dvere',
     ac: 'Klikni na stenu pre klimu',
-    couch: 'Klikni do izby',
-    bed: 'Klikni do izby',
-    ward: 'Klikni do izby',
-    table: 'Klikni do izby',
+    ward: 'Klikni do izby pre skriňu',
     temp: 'Klikni na izbu = zmeniť štartovaciu teplotu',
   };
   dom.statusMsg.textContent = messages[t] || '';

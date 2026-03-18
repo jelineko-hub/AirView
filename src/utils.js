@@ -110,17 +110,3 @@ export function getObjectPixels(type, obj) {
   return                       { x1: rx + rw, y1: ry + obj.pos * rh - halfWidth, x2: rx + rw, y2: ry + obj.pos * rh + halfWidth };
 }
 
-/** Find nearest wall for drag detection (with zoom-aware threshold) */
-export function wallNear(mx, my, zoom) {
-  const threshold = 10 / zoom;
-  for (let i = scene.rooms.length - 1; i >= 0; i--) {
-    const r = scene.rooms[i];
-    const rx = OX + mToP(r.x), ry = OY + mToP(r.y);
-    const rw = mToP(r.w), rh = mToP(r.h);
-    if (Math.abs(my - ry) < threshold && mx >= rx - threshold && mx <= rx + rw + threshold) return { ri: i, wall: 'top' };
-    if (Math.abs(my - (ry + rh)) < threshold && mx >= rx - threshold && mx <= rx + rw + threshold) return { ri: i, wall: 'bottom' };
-    if (Math.abs(mx - rx) < threshold && my >= ry - threshold && my <= ry + rh + threshold) return { ri: i, wall: 'left' };
-    if (Math.abs(mx - (rx + rw)) < threshold && my >= ry - threshold && my <= ry + rh + threshold) return { ri: i, wall: 'right' };
-  }
-  return null;
-}

@@ -9,6 +9,8 @@ export function getState() {
     wins: scene.windows,
     furns: scene.furniture,
     doors: scene.doors,
+    lines: scene.lines,
+    wallOpenings: scene.wallOpenings,
     acUnits: scene.acUnits,
     southSide: scene.southSide,
     westSide: scene.westSide,
@@ -23,6 +25,8 @@ export function applyState(s) {
   scene.windows = s.wins || [];
   scene.furniture = s.furns || [];
   scene.doors = s.doors || [];
+  scene.lines = s.lines || [];
+  scene.wallOpenings = s.wallOpenings || [];
   scene.acUnits = s.acUnits || [];
   scene.southSide = s.southSide || null;
   scene.westSide = s.westSide || null;
