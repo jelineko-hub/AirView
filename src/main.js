@@ -1,5 +1,5 @@
 import { canvas, scene, view, editor, sim, dom, cacheDom, AC_MODELS } from './state.js';
-import { drawEditor, drawSim } from './renderer.js';
+import { drawEditor, drawSim, drawTempLabels } from './renderer.js';
 import { initSim, emitParticles, updateParticles, updateGrid } from './simulation.js';
 import { setupEditorEvents } from './editor.js';
 import { autoSave, manualSave, load, exportJSON, importJSON } from './storage.js';
@@ -93,11 +93,16 @@ function captureSnapshot() {
   const nextSnapTime = (sim.lastSnapTime < 0) ? interval : sim.lastSnapTime + interval;
   if (sim.elapsed >= nextSnapTime) {
     const mins = Math.floor(sim.elapsed / 60);
-    const secs = sim.elapsed % 60;
-    const timeLabel = String(mins).padStart(2, '0') + ':' + String(secs).padStart(2, '0');
+    // Draw temp labels on canvas, capture, then next frame redraws without them
+    const ctx = canvas.ctx;
+    ctx.save();
+    ctx.translate(view.x, view.y);
+    ctx.scale(view.zoom, view.zoom);
+    drawTempLabels(ctx);
+    ctx.restore();
     sim.snapshots.push({
       time: sim.elapsed,
-      timeLabel,
+      mins,
       imgData: canvas.el.toDataURL('image/png'),
     });
     sim.lastSnapTime = sim.elapsed;

@@ -1,9 +1,19 @@
-import { canvas, scene, sim, dom, AC_MODELS } from './state.js';
+import { canvas, scene, sim, dom, AC_MODELS, view } from './state.js';
 import { allBoundingBox } from './utils.js';
+import { drawSim, drawTempLabels } from './renderer.js';
+
+const SCALE_HTML = `<div class="temp-scale"><span>16°C</span><div class="scale-bar"></div><span>30°C</span></div>`;
 
 export function generateReport() {
-  // Current canvas as final image
+  // Capture current canvas with temp labels
+  const ctx = canvas.ctx;
+  ctx.save();
+  ctx.translate(view.x, view.y);
+  ctx.scale(view.zoom, view.zoom);
+  drawTempLabels(ctx);
+  ctx.restore();
   const finalImg = canvas.el.toDataURL('image/png');
+  // Redraw without labels on next frame
 
   // Gather data
   const bb = allBoundingBox();
@@ -52,23 +62,23 @@ export function generateReport() {
   const snapInterval = dom.snapInterval.value;
   let snapshotsHtml = '';
   if (sim.snapshots.length > 0) {
-    const snapsItems = sim.snapshots.map(s =>
-      `<div class="snap-item">
-        <div class="snap-time">${s.timeLabel}</div>
-        <img class="snap-img" src="${s.imgData}" alt="Čas: ${s.timeLabel}">
-      </div>`
-    ).join('');
-    // Add final state
-    const finalTime = Math.floor(sim.elapsed / 60) + ':' + String(sim.elapsed % 60).padStart(2, '0');
+    const snapsItems = sim.snapshots.map(s => {
+      const label = `po ${s.mins} minútach`;
+      return `<div class="snap-item">
+        <div class="snap-header"><span class="snap-time">${label}</span></div>
+        <div class="snap-body"><img class="snap-img" src="${s.imgData}" alt="${label}">${SCALE_HTML}</div>
+      </div>`;
+    }).join('');
+    // Final state
+    const finalMins = Math.floor(sim.elapsed / 60);
+    const finalLabel = sim.done ? `po ${finalMins} minútach (koniec)` : `po ${finalMins} minútach (aktuálny stav)`;
     snapshotsHtml = `
     <div class="section">
       <h2>Priebeh simulácie (interval: ${snapInterval} min)</h2>
-      <div class="snap-grid">
-        ${snapsItems}
-        <div class="snap-item">
-          <div class="snap-time">${finalTime} (aktuálny stav)</div>
-          <img class="snap-img" src="${finalImg}" alt="Aktuálny stav">
-        </div>
+      ${snapsItems}
+      <div class="snap-item">
+        <div class="snap-header"><span class="snap-time">${finalLabel}</span></div>
+        <div class="snap-body"><img class="snap-img" src="${finalImg}" alt="${finalLabel}">${SCALE_HTML}</div>
       </div>
     </div>`;
   } else {
@@ -76,7 +86,10 @@ export function generateReport() {
     <div class="section">
       <h2>Vizualizácia simulácie</h2>
       <p style="font-size:11px;color:#888;margin-bottom:8px">Snímky priebehu nie sú k dispozícii. Spustite simuláciu od začiatku do konca pre zachytenie snímok.</p>
-      <img class="sim-img" src="${finalImg}" alt="Simulácia">
+      <div class="snap-item">
+        <div class="snap-header"><span class="snap-time">Aktuálny stav</span></div>
+        <div class="snap-body"><img class="snap-img" src="${finalImg}" alt="Aktuálny stav">${SCALE_HTML}</div>
+      </div>
     </div>`;
   }
 
@@ -91,16 +104,19 @@ export function generateReport() {
 <style>
   @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&display=swap');
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: 'DM Sans', sans-serif; color: #222; padding: 30px 40px; max-width: 900px; margin: 0 auto; }
+  body { font-family: 'DM Sans', sans-serif; color: #222; padding: 30px 40px; max-width: 960px; margin: 0 auto; }
   h1 { font-size: 22px; color: #0a5e46; margin-bottom: 4px; }
   .subtitle { font-size: 12px; color: #888; margin-bottom: 20px; }
-  .section { margin-bottom: 18px; }
-  .section h2 { font-size: 14px; font-weight: 600; color: #555; border-bottom: 1px solid #e0ddd5; padding-bottom: 4px; margin-bottom: 8px; }
-  .sim-img { width: 100%; border: 1px solid #ddd; border-radius: 6px; margin-bottom: 16px; }
-  .snap-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-  .snap-item { border: 1px solid #e0ddd5; border-radius: 6px; overflow: hidden; }
-  .snap-time { font-size: 11px; font-weight: 600; color: #0a5e46; padding: 4px 8px; background: #f5f4f0; }
+  .section { margin-bottom: 22px; }
+  .section h2 { font-size: 14px; font-weight: 600; color: #555; border-bottom: 1px solid #e0ddd5; padding-bottom: 4px; margin-bottom: 10px; }
+  .snap-item { margin-bottom: 16px; border: 1px solid #e0ddd5; border-radius: 6px; overflow: hidden; }
+  .snap-header { padding: 6px 12px; background: #f5f4f0; border-bottom: 1px solid #e8e5dd; }
+  .snap-time { font-size: 13px; font-weight: 600; color: #0a5e46; }
+  .snap-body { position: relative; }
   .snap-img { width: 100%; display: block; }
+  .temp-scale { display: flex; align-items: center; gap: 6px; padding: 6px 12px; background: #f9f8f5; border-top: 1px solid #e8e5dd; }
+  .temp-scale span { font-size: 10px; color: #888; white-space: nowrap; }
+  .scale-bar { height: 8px; flex: 1; border-radius: 4px; background: linear-gradient(to right, #1040d0, #20a0d0, #40c840, #e0d020, #e07020, #d02020); }
   table { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 8px; }
   th { text-align: left; font-weight: 600; color: #666; padding: 4px 8px; border-bottom: 2px solid #e0ddd5; }
   td { padding: 4px 8px; border-bottom: 1px solid #eee; }

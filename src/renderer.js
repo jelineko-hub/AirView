@@ -464,7 +464,7 @@ function drawSimHUD(ctx, cpx) {
   }
 }
 
-function drawTempLabels(ctx) {
+export function drawTempLabels(ctx) {
   const { gridW, gridH, cellSize, bboxX, bboxY } = sim;
   const step = Math.round(1 / cellSize); // cells per meter
   ctx.font = '9px DM Sans';
