@@ -1,5 +1,5 @@
 import {
-  FURNITURE_DEFS, scene, canvas, view, editor, pinch, dom,
+  FURNITURE_DEFS, scene, canvas, view, editor, pinch, dom, OX, OY,
 } from './state.js';
 import { mToP, pToM, snapGrid, snapGrid2, wallAtPixel, detectRooms, isInsideAnyRoom, getObjectPixels, allBoundingBox, roomAtMeter } from './utils.js';
 import { autoSave } from './storage.js';
@@ -454,7 +454,13 @@ export function setupEditorEvents() {
       dom.statusMsg.textContent = 'Dvere pridané';
       detectRooms(); autoSave();
     } else if (editor.tool === 'ac') {
-      scene.acUnits.push({ wi: hit.wi, pos: hit.pos, model: 1, mode: 1, on: true });
+      // Determine which side of the wall the user clicked on
+      const w = scene.walls[hit.wi];
+      const isH = Math.abs(w.y1 - w.y2) < 0.001;
+      const wallPx = OY + mToP(isH ? w.y1 : w.x1);
+      const clickPx = isH ? my : mx;
+      const side = clickPx > wallPx ? 1 : -1;  // +1 = below/right, -1 = above/left
+      scene.acUnits.push({ wi: hit.wi, pos: hit.pos, side, model: 1, mode: 1, on: true });
       dom.statusMsg.textContent = 'Klima umiestnená!';
       checkReady(); autoSave();
     }

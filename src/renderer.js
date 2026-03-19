@@ -43,7 +43,7 @@ function drawGrid() {
 
 // ── AC Unit Drawing ──
 
-export function drawAcUnit(ctx, wall, pos, label) {
+export function drawAcUnit(ctx, wall, pos, label, unitSide) {
   if (!wall) return;
   const wx1 = OX + mToP(wall.x1), wy1 = OY + mToP(wall.y1);
   const wx2 = OX + mToP(wall.x2), wy2 = OY + mToP(wall.y2);
@@ -51,15 +51,20 @@ export function drawAcUnit(ctx, wall, pos, label) {
   const isH = Math.abs(wall.y1 - wall.y2) < 0.001;
   const uw = 58, uh = 14;
 
-  // Determine inside direction (toward bounding box center)
-  const bb = allBoundingBox();
+  // Use stored side if available, otherwise fall back to bounding box heuristic
   let offX = 0, offY = 0;
-  if (bb) {
-    const cx = OX + mToP(bb.x + bb.w / 2), cy = OY + mToP(bb.y + bb.h / 2);
-    if (isH) offY = ay < cy ? 1 : -1;
-    else offX = ax < cx ? 1 : -1;
+  if (unitSide != null) {
+    if (isH) offY = unitSide;
+    else offX = unitSide;
   } else {
-    if (isH) offY = 1; else offX = 1;
+    const bb = allBoundingBox();
+    if (bb) {
+      const cx = OX + mToP(bb.x + bb.w / 2), cy = OY + mToP(bb.y + bb.h / 2);
+      if (isH) offY = ay < cy ? 1 : -1;
+      else offX = ax < cx ? 1 : -1;
+    } else {
+      if (isH) offY = 1; else offX = 1;
+    }
   }
 
   let bx, by, bw, bh;
@@ -265,7 +270,7 @@ export function drawEditor() {
   scene.acUnits.forEach((u, i) => {
     const w = scene.walls[u.wi];
     if (!w) return;
-    drawAcUnit(ctx, w, u.pos, String(i + 1));
+    drawAcUnit(ctx, w, u.pos, String(i + 1), u.side);
   });
 
   // Bounding box dimensions
@@ -395,15 +400,15 @@ function drawAcCones(ctx) {
     const wx2 = OX + mToP(w.x2), wy2 = OY + mToP(w.y2);
     const ax = wx1 + u.pos * (wx2 - wx1), ay = wy1 + u.pos * (wy2 - wy1);
 
-    // Determine base angle from wall normal
+    // Determine base angle from wall normal — use stored side if available
     let ba;
-    if (isH) {
-      // Horizontal wall — blow up or down based on room position
-      const bb = allBoundingBox();
-      ba = bb && w.y1 < bb.y + bb.h / 2 ? Math.PI / 2 : -Math.PI / 2;
+    if (u.side != null) {
+      if (isH) ba = u.side > 0 ? Math.PI / 2 : -Math.PI / 2;
+      else ba = u.side > 0 ? 0 : Math.PI;
     } else {
       const bb = allBoundingBox();
-      ba = bb && w.x1 < bb.x + bb.w / 2 ? 0 : Math.PI;
+      if (isH) ba = bb && w.y1 < bb.y + bb.h / 2 ? Math.PI / 2 : -Math.PI / 2;
+      else ba = bb && w.x1 < bb.x + bb.w / 2 ? 0 : Math.PI;
     }
 
     const pw = Math.max(sim.unitPower[ui], .2);
@@ -421,7 +426,7 @@ function drawAcCones(ctx) {
     ctx.moveTo(ax, ay); ctx.lineTo(ax + Math.cos(ea - ha) * 45, ay + Math.sin(ea - ha) * 45);
     ctx.stroke(); ctx.setLineDash([]);
 
-    drawAcUnit(ctx, w, u.pos, String(ui + 1));
+    drawAcUnit(ctx, w, u.pos, String(ui + 1), u.side);
   });
 }
 

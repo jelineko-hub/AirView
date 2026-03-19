@@ -379,6 +379,11 @@ function getUnitBaseAngle(u) {
   const w = scene.walls[u.wi];
   if (!w) return 0;
   const isH = wallDir(w) === 'h';
+  // Use stored side if available, otherwise fall back to bounding box heuristic
+  if (u.side != null) {
+    if (isH) return u.side > 0 ? Math.PI / 2 : -Math.PI / 2;
+    return u.side > 0 ? 0 : Math.PI;
+  }
   const bb = allBoundingBox();
   if (isH) return bb && w.y1 < bb.y + bb.h / 2 ? Math.PI / 2 : -Math.PI / 2;
   return bb && w.x1 < bb.x + bb.w / 2 ? 0 : Math.PI;
