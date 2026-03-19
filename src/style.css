@@ -63,6 +63,8 @@ header h1 { font-size: 16px; font-weight: 700; color: #0a5e46 }
   font-family: inherit;
   color: #555;
 }
+.tb-ac { background: #e3f0ff; color: #1a6fbf; border-color: #1a6fbf; font-weight: 600 }
+.tb-ac.active { background: #c4dfff; color: #0d4f8a; border-color: #0d4f8a }
 .tb:hover { border-color: #aaa }
 .tb.active {
   background: #e6f5ef;

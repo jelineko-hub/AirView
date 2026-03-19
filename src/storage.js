@@ -110,7 +110,7 @@ export function load() {
 export function exportJSON() {
   const a = document.createElement('a');
   a.href = 'data:application/json,' + encodeURIComponent(JSON.stringify(getState(), null, 2));
-  a.download = 'airview-podorys.json';
+  a.download = 'acdone-podorys.json';
   a.click();
   dom.statusMsg.textContent = 'Exportované ✓';
 }

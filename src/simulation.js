@@ -111,14 +111,16 @@ function buildSimMaps() {
       const gx1 = Math.floor((Math.min(w.x1, w.x2) - bboxX) / cellSize);
       const gx2 = Math.ceil((Math.max(w.x1, w.x2) - bboxX) / cellSize);
       for (let x = Math.max(0, gx1); x <= Math.min(gridW - 1, gx2); x++) {
-        if (gy >= 0 && gy < gridH) wallCell[gy * gridW + x] = 1;
+        const px = bboxX + (x + .5) * cellSize;
+        if (gy >= 0 && gy < gridH && !cellInDoor(px, w.y1)) wallCell[gy * gridW + x] = 1;
       }
     } else {
       const gx = Math.round((w.x1 - bboxX) / cellSize);
       const gy1 = Math.floor((Math.min(w.y1, w.y2) - bboxY) / cellSize);
       const gy2 = Math.ceil((Math.max(w.y1, w.y2) - bboxY) / cellSize);
       for (let y = Math.max(0, gy1); y <= Math.min(gridH - 1, gy2); y++) {
-        if (gx >= 0 && gx < gridW) wallCell[y * gridW + gx] = 1;
+        const py = bboxY + (y + .5) * cellSize;
+        if (gx >= 0 && gx < gridW && !cellInDoor(w.x1, py)) wallCell[y * gridW + gx] = 1;
       }
     }
   });
