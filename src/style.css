@@ -63,8 +63,8 @@ header h1 { font-size: 16px; font-weight: 700; color: #0a5e46 }
   font-family: inherit;
   color: #555;
 }
-.tb-ac { background: #e3f0ff; color: #1a6fbf; border-color: #1a6fbf; font-weight: 600 }
-.tb-ac.active { background: #c4dfff; color: #0d4f8a; border-color: #0d4f8a }
+.tb-ac { background: #f0f5ff; color: #6a9fd8; border-color: #a8c8e8; font-weight: 600 }
+.tb-ac.active { background: #1a6fbf; color: #fff; border-color: #0d5a9e }
 .tb-ac-big { font-size: 13px; padding: 6px 18px }
 .tb-icon { padding: 4px 8px; line-height: 0 }
 .tb:hover { border-color: #aaa }
@@ -113,6 +113,19 @@ header h1 { font-size: 16px; font-weight: 700; color: #0a5e46 }
   font-family: inherit;
 }
 .btn-sim:disabled { background: #e8a0a0; color: #fff; cursor: default }
+.btn-clear {
+  font-size: 11px;
+  padding: 4px 12px;
+  border-radius: 5px;
+  border: 1px solid #e0c860;
+  background: #fdf8e0;
+  color: #a08820;
+  cursor: pointer;
+  font-family: inherit;
+  font-weight: 600;
+}
+.btn-clear:hover { background: #f5e050; color: #705800; border-color: #c8a020 }
+.btn-clear:active { background: #ecd530; color: #504000; border-color: #b09010 }
 .btn-sm {
   font-size: 11px;
   padding: 4px 12px;

@@ -38,6 +38,7 @@ function initUI() {
   });
 
   dom.clearBtn.onclick = () => {
+    if (!confirm('Ste si istí, že chcete celý pôdorys vymazať?')) return;
     scene.walls = []; scene.rooms = [];
     scene.windows = []; scene.furniture = [];
     scene.doors = []; scene.acUnits = [];

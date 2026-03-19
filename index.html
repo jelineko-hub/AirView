@@ -8,7 +8,7 @@
 </head>
 <body>
 <header>
-<h1>ACdone <span style="font-size:10px;font-weight:400;color:#999">v2026.03.18-021</span></h1>
+<h1>ACdone <span style="font-size:10px;font-weight:400;color:#999">v2026.03.18-024</span></h1>
 <span class="mode-label" id="modeLabel">Editor</span>
 <span id="statusMsg">Ťahaj = nový obdĺžnik (4 steny)</span>
 <div class="group" style="margin-left:auto"><label>Zoom</label><input type="range" id="zoomSlider" min="30" max="400" value="100" style="width:80px"><span class="val" id="zoomVal">1.0×</span></div>
@@ -18,14 +18,14 @@
 <div style="width:1px;height:20px;background:#ddd;margin:0 2px"></div>
 <button class="btn-sim" id="simBtn" disabled>Simulácia →</button>
 <button class="btn-sm" id="editBtn" style="display:none">← Upraviť</button>
-<button class="btn-sm" id="clearBtn">Vymazať</button>
+<button class="btn-clear" id="clearBtn">Vymazať</button>
 </div>
 </header>
 <div class="toolbar" id="edToolbar">
 <div class="tb-group"><span class="tb-group-label">Pôdorys</span><div class="tb-group-row">
 <button class="tb tb-icon active" data-m="room" title="Obdĺžnik (4 steny)"><svg width="18" height="14" viewBox="0 0 18 14"><rect x="2" y="2" width="14" height="10" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button>
 <button class="tb tb-icon" data-m="wall" title="Stena (jedna čiara)"><svg width="18" height="14" viewBox="0 0 18 14"><line x1="2" y1="12" x2="16" y2="2" stroke="currentColor" stroke-width="1.5"/><circle cx="2" cy="12" r="2.2" fill="#0a5e46"/><circle cx="16" cy="2" r="2.2" fill="#0a5e46"/></svg></button>
-<button class="tb tb-icon" data-m="delwall" title="Vymazať stenu"><svg width="18" height="14" viewBox="0 0 18 14"><line x1="2" y1="12" x2="16" y2="2" stroke="currentColor" stroke-width="1.5"/><circle cx="2" cy="12" r="2.2" fill="#0a5e46"/><circle cx="16" cy="2" r="2.2" fill="#0a5e46"/><line x1="7" y1="5" x2="11" y2="9" stroke="#c44" stroke-width="1.8" stroke-linecap="round"/><line x1="11" y1="5" x2="7" y2="9" stroke="#c44" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+<button class="tb tb-icon" data-m="delwall" title="Vymazať stenu"><svg width="22" height="14" viewBox="0 0 22 14"><rect x="1" y="1" width="9.5" height="12" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="10.5" y="1" width="9.5" height="12" fill="none" stroke="currentColor" stroke-width="1.3"/><line x1="7.5" y1="3" x2="13.5" y2="11" stroke="#c44" stroke-width="2" stroke-linecap="round"/><line x1="13.5" y1="3" x2="7.5" y2="11" stroke="#c44" stroke-width="2" stroke-linecap="round"/></svg></button>
 </div></div>
 <div class="sep"></div>
 <div class="tb-group"><span class="tb-group-label">Interiér</span><div class="tb-group-row">
