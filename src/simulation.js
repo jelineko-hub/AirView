@@ -101,58 +101,45 @@ function buildSimMaps() {
   // Build wall barriers first
   buildWallMaps();
 
-  // Build airMap via flood fill (independent of detectRooms)
-  // 1. Mark wall cells on grid
-  const wallCell = new Uint8Array(gridW * gridH);
-  scene.walls.forEach(w => {
-    const isH = wallDir(w) === 'h';
-    if (isH) {
-      const gy = Math.round((w.y1 - bboxY) / cellSize);
-      const gx1 = Math.floor((Math.min(w.x1, w.x2) - bboxX) / cellSize);
-      const gx2 = Math.ceil((Math.max(w.x1, w.x2) - bboxX) / cellSize);
-      for (let x = Math.max(0, gx1); x <= Math.min(gridW - 1, gx2); x++) {
-        const px = bboxX + (x + .5) * cellSize;
-        if (gy >= 0 && gy < gridH && !cellInDoor(px, w.y1)) wallCell[gy * gridW + x] = 1;
-      }
-    } else {
-      const gx = Math.round((w.x1 - bboxX) / cellSize);
-      const gy1 = Math.floor((Math.min(w.y1, w.y2) - bboxY) / cellSize);
-      const gy2 = Math.ceil((Math.max(w.y1, w.y2) - bboxY) / cellSize);
-      for (let y = Math.max(0, gy1); y <= Math.min(gridH - 1, gy2); y++) {
-        const py = bboxY + (y + .5) * cellSize;
-        if (gx >= 0 && gx < gridW && !cellInDoor(w.x1, py)) wallCell[y * gridW + gx] = 1;
-      }
-    }
-  });
-
-  // 2. Flood fill from borders to mark outside cells
+  // Build airMap via flood fill using wallH/wallV barriers
+  // Flood fill from borders — walls block propagation, everything not reached = air
   const outside = new Uint8Array(gridW * gridH);
   const queue = [];
   for (let x = 0; x < gridW; x++) {
-    if (!wallCell[x]) { outside[x] = 1; queue.push(x); }
+    outside[x] = 1; queue.push(x);
     const bi = (gridH - 1) * gridW + x;
-    if (!wallCell[bi]) { outside[bi] = 1; queue.push(bi); }
+    outside[bi] = 1; queue.push(bi);
   }
   for (let y = 1; y < gridH - 1; y++) {
-    if (!wallCell[y * gridW]) { outside[y * gridW] = 1; queue.push(y * gridW); }
+    outside[y * gridW] = 1; queue.push(y * gridW);
     const ri = y * gridW + gridW - 1;
-    if (!wallCell[ri]) { outside[ri] = 1; queue.push(ri); }
+    outside[ri] = 1; queue.push(ri);
   }
   let qi = 0;
   while (qi < queue.length) {
     const idx = queue[qi++];
     const x = idx % gridW, y = (idx - x) / gridW;
-    const nb = [y > 0 ? idx - gridW : -1, y < gridH - 1 ? idx + gridW : -1,
-                x > 0 ? idx - 1 : -1, x < gridW - 1 ? idx + 1 : -1];
-    for (let i = 0; i < 4; i++) {
-      const ni = nb[i];
-      if (ni >= 0 && !wallCell[ni] && !outside[ni]) { outside[ni] = 1; queue.push(ni); }
+    // Up: barrier wallV at (x,y) blocks between (x,y-1) and (x,y)
+    if (y > 0 && !outside[idx - gridW] && !sim.wallV[idx]) {
+      outside[idx - gridW] = 1; queue.push(idx - gridW);
+    }
+    // Down: barrier wallV at (x,y+1) blocks between (x,y) and (x,y+1)
+    if (y < gridH - 1 && !outside[idx + gridW] && !sim.wallV[idx + gridW]) {
+      outside[idx + gridW] = 1; queue.push(idx + gridW);
+    }
+    // Left: barrier wallH at (x,y) blocks between (x-1,y) and (x,y)
+    if (x > 0 && !outside[idx - 1] && !sim.wallH[idx]) {
+      outside[idx - 1] = 1; queue.push(idx - 1);
+    }
+    // Right: barrier wallH at (x+1,y) blocks between (x,y) and (x+1,y)
+    if (x < gridW - 1 && !outside[idx + 1] && !sim.wallH[idx + 1]) {
+      outside[idx + 1] = 1; queue.push(idx + 1);
     }
   }
 
-  // 3. Everything not outside and not wall = air
+  // Everything not outside = air
   for (let i = 0; i < gridW * gridH; i++) {
-    sim.airMap[i] = (!wallCell[i] && !outside[i]) ? 1 : 0;
+    sim.airMap[i] = outside[i] ? 0 : 1;
   }
 
   // 4. Map air cells to detected rooms (for temperature)
