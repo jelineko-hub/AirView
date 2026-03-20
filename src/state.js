@@ -72,6 +72,7 @@ export const editor = {
   cursorX: -1,
   cursorY: -1,
   clickGuard: 0,
+  acPreview: null,  // {wi, pos, side} — live AC preview when AC tool active
 };
 
 // ── Simulation state ──

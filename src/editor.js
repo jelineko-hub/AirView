@@ -6,6 +6,8 @@ import { mToP, pToM, snapGrid, snapGrid2, wallAtPixel, detectRooms, isInsideAnyR
 import { autoSave } from './storage.js';
 import { checkReady, setTool, syncZoomSlider } from './ui.js';
 
+const AC_HALF_W = 29; // half AC unit width in pixels (58/2)
+
 // ── Helpers ──
 
 function addWall(x1, y1, x2, y2) {
@@ -22,6 +24,80 @@ function removeWallAndRefs(wi) {
   scene.doors.forEach(o => { if (o.wi > wi) o.wi--; });
   scene.acUnits.forEach(o => { if (o.wi > wi) o.wi--; });
   scene.walls.splice(wi, 1);
+}
+
+/** Check if AC at given wall position would overlap a perpendicular wall */
+function isAcPlacementValid(wi, pos) {
+  const w = scene.walls[wi];
+  const isH = Math.abs(w.y1 - w.y2) < 0.001;
+  const wMin = isH ? Math.min(w.x1, w.x2) : Math.min(w.y1, w.y2);
+  const wMax = isH ? Math.max(w.x1, w.x2) : Math.max(w.y1, w.y2);
+  const wFixed = isH ? w.y1 : w.x1;
+  const acCenter = wMin + pos * (wMax - wMin); // position along wall in meters
+  const acHalfM = AC_HALF_W / 80; // ~0.3625m
+
+  // Check AC doesn't extend past wall endpoints (with small tolerance)
+  if (acCenter - acHalfM < wMin - 0.02 || acCenter + acHalfM > wMax + 0.02) return false;
+
+  // Check no perpendicular wall intersects within AC body range
+  for (let i = 0; i < scene.walls.length; i++) {
+    if (i === wi) continue;
+    const w2 = scene.walls[i];
+    const isH2 = Math.abs(w2.y1 - w2.y2) < 0.001;
+    if (isH === isH2) continue; // skip parallel walls
+    if (isH) {
+      // w is horizontal, w2 is vertical at x = w2.x1
+      const w2yMin = Math.min(w2.y1, w2.y2), w2yMax = Math.max(w2.y1, w2.y2);
+      if (wFixed >= w2yMin - 0.05 && wFixed <= w2yMax + 0.05) {
+        // Perpendicular wall touches this wall — check if within AC body
+        if (w2.x1 > acCenter - acHalfM + 0.05 && w2.x1 < acCenter + acHalfM - 0.05) return false;
+      }
+    } else {
+      // w is vertical, w2 is horizontal at y = w2.y1
+      const w2xMin = Math.min(w2.x1, w2.x2), w2xMax = Math.max(w2.x1, w2.x2);
+      if (wFixed >= w2xMin - 0.05 && wFixed <= w2xMax + 0.05) {
+        if (w2.y1 > acCenter - acHalfM + 0.05 && w2.y1 < acCenter + acHalfM - 0.05) return false;
+      }
+    }
+  }
+  return true;
+}
+
+/** Compute AC preview data for current cursor position */
+function computeAcPreview(mx, my) {
+  const hit = wallAtPixel(mx, my);
+  if (!hit) return null;
+
+  // Check room side
+  const w = scene.walls[hit.wi];
+  const isH = Math.abs(w.y1 - w.y2) < 0.001;
+  const posM = isH
+    ? { x: w.x1 + hit.pos * (w.x2 - w.x1), y: w.y1 }
+    : { x: w.x1, y: w.y1 + hit.pos * (w.y2 - w.y1) };
+  const probe = 0.15;
+  let sideA, sideB;
+  if (isH) {
+    sideA = roomAtMeter(posM.x, posM.y - probe);
+    sideB = roomAtMeter(posM.x, posM.y + probe);
+  } else {
+    sideA = roomAtMeter(posM.x - probe, posM.y);
+    sideB = roomAtMeter(posM.x + probe, posM.y);
+  }
+  let side;
+  if (sideA >= 0 && sideB >= 0) {
+    const wallPx = isH ? (OY + mToP(w.y1)) : (OX + mToP(w.x1));
+    const clickPx = isH ? my : mx;
+    side = clickPx > wallPx ? 1 : -1;
+  } else if (sideB >= 0) {
+    side = 1;
+  } else if (sideA >= 0) {
+    side = -1;
+  } else {
+    return null; // no room on either side
+  }
+
+  const valid = isAcPlacementValid(hit.wi, hit.pos);
+  return { wi: hit.wi, pos: hit.pos, side, valid };
 }
 
 function afterWallChange() {
@@ -217,6 +293,13 @@ export function setupEditorEvents() {
     if (editor.dragFurnIndex >= 0 && editor.mode === 'editor') {
       scene.furniture[editor.dragFurnIndex].x = snapGrid2(pToM(editor.cursorX - editor.dragOffset.x - 50));
       scene.furniture[editor.dragFurnIndex].y = snapGrid2(pToM(editor.cursorY - editor.dragOffset.y - 36));
+    }
+
+    // AC preview — live position when AC tool is active
+    if (editor.tool === 'ac' && editor.mode === 'editor') {
+      editor.acPreview = computeAcPreview(editor.cursorX, editor.cursorY);
+    } else {
+      editor.acPreview = null;
     }
   });
 
@@ -455,38 +538,16 @@ export function setupEditorEvents() {
       dom.statusMsg.textContent = 'Dvere pridané';
       detectRooms(); autoSave();
     } else if (editor.tool === 'ac') {
-      // Determine which side of the wall to place AC — must be inside a room
-      const w = scene.walls[hit.wi];
-      const isH = Math.abs(w.y1 - w.y2) < 0.001;
-      // Wall position along the wall at the click point (in meters)
-      const posM = isH
-        ? { x: w.x1 + hit.pos * (w.x2 - w.x1), y: w.y1 }
-        : { x: w.x1, y: w.y1 + hit.pos * (w.y2 - w.y1) };
-      // Check which side has a room (probe 0.15m into each side)
-      const probe = 0.15;
-      let sideA, sideB;
-      if (isH) {
-        sideA = roomAtMeter(posM.x, posM.y - probe); // above = side -1
-        sideB = roomAtMeter(posM.x, posM.y + probe); // below = side +1
-      } else {
-        sideA = roomAtMeter(posM.x - probe, posM.y); // left = side -1
-        sideB = roomAtMeter(posM.x + probe, posM.y); // right = side +1
-      }
-      let side;
-      if (sideA >= 0 && sideB >= 0) {
-        // Both sides are rooms — use click position to decide
-        const wallPx = isH ? (OY + mToP(w.y1)) : (OX + mToP(w.x1));
-        const clickPx = isH ? my : mx;
-        side = clickPx > wallPx ? 1 : -1;
-      } else if (sideB >= 0) {
-        side = 1;  // only below/right is a room
-      } else if (sideA >= 0) {
-        side = -1; // only above/left is a room
-      } else {
+      const preview = computeAcPreview(mx, my);
+      if (!preview) {
         dom.statusMsg.textContent = 'Klima musí byť na stene izby!';
         return;
       }
-      scene.acUnits.push({ wi: hit.wi, pos: hit.pos, side, model: 1, mode: 1, on: true });
+      if (!preview.valid) {
+        dom.statusMsg.textContent = 'Tu sa klima nezmestí — príliš blízko rohu alebo inej steny';
+        return;
+      }
+      scene.acUnits.push({ wi: preview.wi, pos: preview.pos, side: preview.side, model: 1, mode: 1, on: true });
       dom.statusMsg.textContent = 'Klima umiestnená!';
       checkReady(); autoSave();
     }

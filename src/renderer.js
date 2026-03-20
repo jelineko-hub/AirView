@@ -273,6 +273,26 @@ export function drawEditor() {
     drawAcUnit(ctx, w, u.pos, String(i + 1), u.side);
   });
 
+  // AC preview (ghost) when AC tool active
+  if (editor.acPreview) {
+    const p = editor.acPreview;
+    const w = scene.walls[p.wi];
+    if (w) {
+      ctx.globalAlpha = p.valid ? 0.5 : 0.25;
+      drawAcUnit(ctx, w, p.pos, '?', p.side);
+      ctx.globalAlpha = 1;
+      if (!p.valid) {
+        // Draw red X over invalid position
+        const wx1 = OX + mToP(w.x1), wy1 = OY + mToP(w.y1);
+        const wx2 = OX + mToP(w.x2), wy2 = OY + mToP(w.y2);
+        const cx = wx1 + p.pos * (wx2 - wx1), cy = wy1 + p.pos * (wy2 - wy1);
+        ctx.strokeStyle = '#d00'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(cx - 8, cy - 8); ctx.lineTo(cx + 8, cy + 8); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cx + 8, cy - 8); ctx.lineTo(cx - 8, cy + 8); ctx.stroke();
+      }
+    }
+  }
+
   // Bounding box dimensions
   const bb = allBoundingBox();
   if (bb && bb.w > 0) {
