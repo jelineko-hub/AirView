@@ -2,7 +2,7 @@ import { canvas, scene, view, editor, sim, dom, cacheDom, AC_MODELS } from './st
 import { drawEditor, drawSim, drawTempLabels } from './renderer.js';
 import { initSim, emitParticles, updateParticles, updateGrid } from './simulation.js';
 import { setupEditorEvents } from './editor.js';
-import { autoSave, manualSave, load, exportJSON, importJSON, saveToSlot, getSavedSlots, loadFromSlot, deleteSlot } from './storage.js';
+import { autoSave, load, exportJSON, importJSON, saveToSlot, getSavedSlots, loadFromSlot, deleteSlot } from './storage.js';
 import { setTool, switchToSim, switchToEditor, checkReady, syncZoomSlider } from './ui.js';
 import { detectRooms, allBoundingBox, cropSimArea } from './utils.js';
 import { generateReport } from './report.js';
