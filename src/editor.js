@@ -2,6 +2,7 @@ import {
   FURNITURE_DEFS, scene, canvas, view, editor, pinch, dom, OX, OY,
 } from './state.js';
 import { mToP, pToM, snapGrid, snapGrid2, wallAtPixel, detectRooms, isInsideAnyRoom, getObjectPixels, allBoundingBox, roomAtMeter } from './utils.js';
+
 import { autoSave } from './storage.js';
 import { checkReady, setTool, syncZoomSlider } from './ui.js';
 
@@ -454,12 +455,37 @@ export function setupEditorEvents() {
       dom.statusMsg.textContent = 'Dvere pridané';
       detectRooms(); autoSave();
     } else if (editor.tool === 'ac') {
-      // Determine which side of the wall the user clicked on
+      // Determine which side of the wall to place AC — must be inside a room
       const w = scene.walls[hit.wi];
       const isH = Math.abs(w.y1 - w.y2) < 0.001;
-      const wallPx = OY + mToP(isH ? w.y1 : w.x1);
-      const clickPx = isH ? my : mx;
-      const side = clickPx > wallPx ? 1 : -1;  // +1 = below/right, -1 = above/left
+      // Wall position along the wall at the click point (in meters)
+      const posM = isH
+        ? { x: w.x1 + hit.pos * (w.x2 - w.x1), y: w.y1 }
+        : { x: w.x1, y: w.y1 + hit.pos * (w.y2 - w.y1) };
+      // Check which side has a room (probe 0.15m into each side)
+      const probe = 0.15;
+      let sideA, sideB;
+      if (isH) {
+        sideA = roomAtMeter(posM.x, posM.y - probe); // above = side -1
+        sideB = roomAtMeter(posM.x, posM.y + probe); // below = side +1
+      } else {
+        sideA = roomAtMeter(posM.x - probe, posM.y); // left = side -1
+        sideB = roomAtMeter(posM.x + probe, posM.y); // right = side +1
+      }
+      let side;
+      if (sideA >= 0 && sideB >= 0) {
+        // Both sides are rooms — use click position to decide
+        const wallPx = isH ? (OY + mToP(w.y1)) : (OX + mToP(w.x1));
+        const clickPx = isH ? my : mx;
+        side = clickPx > wallPx ? 1 : -1;
+      } else if (sideB >= 0) {
+        side = 1;  // only below/right is a room
+      } else if (sideA >= 0) {
+        side = -1; // only above/left is a room
+      } else {
+        dom.statusMsg.textContent = 'Klima musí byť na stene izby!';
+        return;
+      }
       scene.acUnits.push({ wi: hit.wi, pos: hit.pos, side, model: 1, mode: 1, on: true });
       dom.statusMsg.textContent = 'Klima umiestnená!';
       checkReady(); autoSave();
